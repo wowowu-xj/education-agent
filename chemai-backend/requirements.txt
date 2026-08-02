@@ -1,0 +1,44 @@
+# ChemAI Backend 依赖清单
+
+# ===== Web 框架 =====
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
+
+# ===== 数据库 ORM 和迁移 =====
+sqlalchemy==2.0.25
+alembic==1.13.1
+pymysql>=1.1.0
+
+# ===== 数据验证和配置 =====
+pydantic==2.6.1
+pydantic-settings==2.1.0
+python-dotenv==1.0.1
+
+# ===== HTTP 客户端 =====
+httpx==0.26.0
+requests==2.31.0
+
+# ===== 定时任务 =====
+apscheduler==3.10.4
+
+# ===== 测试框架 =====
+pytest>=8.0
+pytest-asyncio>=0.24.0
+
+# ===== 向量数据库 =====
+chromadb==0.4.22
+
+# ===== AI 和 LangChain =====
+langchain-openai>=0.1.0
+dashscope==1.20.0
+
+# ===== 认证和加密 =====
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# ===== 文档处理 =====
+python-docx==1.1.0
+
+# ===== 浏览器自动化（OCR 相关） =====
+playwright>=1.40
