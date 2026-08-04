@@ -23,8 +23,17 @@ requests==2.31.0
 apscheduler==3.10.4
 
 # ===== 测试框架 =====
-pytest>=8.0
-pytest-asyncio>=0.24.0
+# 锁死版本：pytest / pytest-asyncio 的大版本升级多次改动 asyncio 用例的
+# 收集与 fixture 作用域行为，浮动版本会让 CI 在没人改代码时突然变红。
+pytest==9.1.1
+pytest-asyncio==1.4.0
+
+# ===== 静态类型检查 =====
+mypy==1.8.0
+# passlib / python-jose 自身不带类型标注，缺了存根 mypy 会报
+# "Library stubs not installed"（import-untyped）而不是真实错误。
+types-passlib==1.7.7.20240819
+types-python-jose==3.3.4.20240106
 
 # ===== 向量数据库 =====
 chromadb==0.4.22
@@ -36,6 +45,10 @@ dashscope==1.20.0
 # ===== 认证和加密 =====
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# bcrypt 必须锁在 4.0.x：
+# - 5.0.0 对超长密码改为抛 ValueError，导致 passlib 1.7.4 的后端探测哈希直接失败
+# - >=4.1 移除了 __about__，passlib 读取版本时会打告警
+bcrypt==4.0.1
 
 # ===== 文档处理 =====
 python-docx==1.1.0
