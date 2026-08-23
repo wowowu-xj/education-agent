@@ -5,11 +5,35 @@ Phase 2 只挂载 JWT 认证中间件和健康检查，业务路由在后续阶�
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
+from app.api.audit import router as audit_router
 from app.core.config import settings
-from app.middleware.auth import DOCS_WHITELIST, WHITELIST_EXACT, JWTAuthMiddleware
+from app.middleware.auth import (
+    DOCS_WHITELIST,
+    WHITELIST_EXACT,
+    WHITELIST_PREFIXES,
+    JWTAuthMiddleware,
+)
+
+# 前端静态资源目录（Vue 3 CDN 单页，无构建步骤）
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+
+# 静态资源前缀白名单：页面与静态资产无需认证即可加载，业务接口仍强制 JWT。
+#   /pages/ 教师端单页（如出题工作台）
+#   /css/   本地样式
+#   /js/    本地脚本
+#   /m/     移动端页面（学生端 / 家长端）
+STATIC_WHITELIST_PREFIXES: tuple[str, ...] = ("/pages/", "/css/", "/js/", "/m/")
+
+# 审核接口前缀白名单（临时）：化学方程式安全审核是纯算法、非敏感业务数据，
+# 出题工作台在登录端点（Phase 3）落地前无法携带 JWT，故临时放行。
+# Phase 3 登录落地后应收回收紧，改由前端携带 access token 调用。
+AUDIT_WHITELIST_PREFIXES: tuple[str, ...] = ("/api/audit/",)
 
 
 def create_app() -> FastAPI:
@@ -41,6 +65,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         JWTAuthMiddleware,
         exact_whitelist=WHITELIST_EXACT | DOCS_WHITELIST if expose_docs else WHITELIST_EXACT,
+        prefix_whitelist=WHITELIST_PREFIXES + STATIC_WHITELIST_PREFIXES + AUDIT_WHITELIST_PREFIXES,
     )
 
     cors_origins = settings.cors_origins_list
@@ -57,6 +82,13 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         """免认证的存活探针。"""
         return {"status": "ok", "app": settings.APP_NAME}
+
+    # 注册业务路由
+    app.include_router(audit_router)
+
+    # 静态资源挂载：挂载在根路径末尾，仅在无匹配路由时命中前端静态文件。
+    # /pages/* /css/* /js/* /m/* 已在中间件白名单中免认证。
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR), name="frontend")
 
     return app
 

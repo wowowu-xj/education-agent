@@ -1,0 +1,7 @@
+{
+  "redox_rules": [
+    {"oxidizer": "浓H2SO4", "wrong_product": "H2", "correct_product": "SO2", "explanation": "浓硫酸氧化性来自 S(+6)，被还原为 SO₂"},
+    {"oxidizer": "浓HNO3", "wrong_product": "H2", "correct_product": "NO2", "explanation": "浓硝酸被还原为 NO₂"},
+    {"oxidizer": "稀HNO3", "wrong_product": "H2", "correct_product": "NO", "explanation": "稀硝酸被还原为 NO"}
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "precipitation_rules": [
+    {"cation": "Ca2+", "anion": "CO3", "product": "CaCO₃↓ 白色沉淀"},
+    {"cation": "Ba2+", "anion": "SO4", "product": "BaSO₄↓ 不溶于酸的白色沉淀"},
+    {"cation": "Ag+", "anion": "Cl-", "product": "AgCl↓ 白色沉淀"},
+    {"cation": "Fe3+", "anion": "OH-", "product": "Fe(OH)₃↓ 红褐色沉淀"},
+    {"cation": "Cu2+", "anion": "OH-", "product": "Cu(OH)₂↓ 蓝色沉淀"},
+    {"cation": "Al3+", "anion": "OH-", "product": "Al(OH)₃↓ 白色胶状沉淀"},
+    {"cation": "Mg2+", "anion": "OH-", "product": "Mg(OH)₂↓ 白色沉淀"},
+    {"cation": "Pb2+", "anion": "SO4", "product": "PbSO₄↓ 白色沉淀"}
+  ],
+  "unstable_products": {
+    "H2CO3": "H₂CO₃ = CO₂↑ + H₂O，不存在游离态碳酸",
+    "H2SO3": "H₂SO₃ 不稳定分解为 SO₂↑ + H₂O",
+    "NH4OH": "NH₄OH = NH₃↑ + H₂O，不存在游离态"
+  }
+}
