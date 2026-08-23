@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>出题工作台 · ChemAI 智辅化学</title>
+
+  <!-- Fonts：Academic Catalyst 三段式字体 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS（Play CDN，零构建）-->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            oxford: '#002147',        // 系统的声音：导航、主按钮、标题
+            'oxford-hover': '#001a38',
+            teal: '#0d7377',          // AI 的声音：辅助按钮、化学元素强调
+            'teal-hover': '#0a5c5f',
+            paper: '#faf8f5',         // 纸的声音：页面主背景、卡片底色
+            'bg-warm': '#f5f0e8',     // 暖色区域
+            accent: '#d4a574',        // 装饰条、分割线
+            ink: '#1a1a2e',           // 正文
+            muted: '#6b7280',         // 辅助文字
+            pass: '#2c6e49',          // 通过绿
+            'pass-bg': '#e8f4ec',
+            warn: '#a16207',          // 警告黄
+            'warn-bg': '#faf0d7',
+            block: '#b43c28',         // 阻断红
+            'block-bg': '#fdecea',
+          },
+          fontFamily: {
+            serif: ['Cormorant Garamond', 'Noto Serif SC', 'serif'],
+            sans: ['IBM Plex Sans', 'Noto Sans SC', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          borderRadius: { DEFAULT: '8px' },
+        },
+      },
+    };
+  </script>
+
+  <!-- Vue 3（全局构建 CDN）-->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+
+  <!-- KaTeX + mhchem（化学式渲染）-->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/mhchem.min.js"></script>
+
+  <style>
+    /* 实验室笔记本：网格纸背景（L1），24px 网格，4% 不透明度 */
+    .labnote-grid {
+      background-image:
+        linear-gradient(rgba(0, 33, 71, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 33, 71, 0.04) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    /* 实验笔记卡片：左侧 1px 红色边距线（L2） */
+    .card-labnote { border-left: 2px solid #b43c28; }
+    /* 化学式等宽字体（F2） */
+    .chem-mono { font-family: 'JetBrains Mono', monospace; }
+    /* 按钮三态反馈（I1） */
+    .btn-feedback { transition: transform 0.1s ease, box-shadow 0.1s ease, opacity 0.1s ease; }
+    .btn-feedback:hover { box-shadow: 0 4px 12px -2px rgba(0, 33, 71, 0.25); }
+    .btn-feedback:active { transform: scale(0.97); }
+    .btn-feedback:disabled { opacity: 0.5; }
+  </style>
+</head>
+<body class="bg-paper text-ink font-sans antialiased">
+  <div id="app" class="min-h-screen flex flex-col">
+
+    <!-- 顶部导航栏 -->
+    <header class="bg-white/90 backdrop-blur border-b border-accent/40 shrink-0">
+      <div class="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <span class="font-serif text-2xl font-bold text-oxford tracking-tight">ChemAI</span>
+          <span class="text-xs text-muted font-medium tracking-widest uppercase">智辅化学 · 教师端</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-9 h-9 rounded-full bg-bg-warm border border-accent/50 flex items-center justify-center text-oxford font-serif font-bold">师</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Tab 导航：TABNAV，激活=Oxford Blue 文字 + 3px 下划线 -->
+    <nav class="bg-white border-b border-accent/30 shrink-0">
+      <div class="max-w-7xl mx-auto px-6 flex gap-6 overflow-x-auto">
+        <button
+          v-for="t in tabs" :key="t.value"
+          @click="activeTab = t.value"
+          class="relative py-3 px-1 font-medium whitespace-nowrap transition-colors"
+          :class="activeTab === t.value ? 'text-oxford' : 'text-muted hover:text-oxford'">
+          {{ t.label }}
+          <span v-if="activeTab === t.value" class="absolute left-0 right-0 bottom-0 h-[3px] bg-oxford rounded-t"></span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- 内容区 -->
+    <main class="flex-1 labnote-grid">
+      <div class="max-w-7xl mx-auto px-6 py-6">
+
+        <!-- ======================= Tab 1：出题工作台 ======================= -->
+        <section v-show="activeTab === 'workbench'">
+          <!-- 子模式切换 -->
+          <div class="inline-flex bg-white border border-accent/40 rounded-lg p-1 mb-6">
+            <button
+              v-for="m in subModes" :key="m.value"
+              @click="subMode = m.value"
+              class="px-5 py-2 rounded-md text-sm font-medium transition-colors"
+              :class="subMode === m.value ? 'bg-oxford text-white' : 'text-muted hover:text-oxford'">
+              {{ m.label }}
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            <!-- ============ 左列：生成控制 / 表单 ============ -->
+            <div class="lg:col-span-4 space-y-5">
+
+              <!-- --- AI 生成子模式 --- -->
+              <div v-show="subMode === 'ai'" class="bg-white border border-accent/40 rounded-lg p-5 card-labnote space-y-5">
+                <h2 class="font-serif text-lg font-bold text-oxford">AI 生成配置</h2>
+
+                <!-- 题型 chip（多选，5 种 AI 题型） -->
+                <div>
+                  <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">题型</label>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      v-for="t in aiTypes" :key="t.value"
+                      @click="toggleType(t.value)"
+                      class="px-3 py-1.5 rounded-full border text-sm transition-colors"
+                      :class="isTypeSelected(t.value) ? 'bg-oxford border-oxford text-white' : 'bg-paper border-accent/50 text-muted hover:border-oxford hover:text-oxford'">
+                      {{ t.label }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 知识点搜索（静态占位） -->
+                <div>
+                  <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">知识点 / 考纲定位</label>
+                  <input
+                    v-model="knowledgePoint"
+                    type="text"
+                    class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford focus:ring-2 focus:ring-oxford/20"
+                    placeholder="例如：氧化还原反应、化学平衡常数…">
+                  <p class="text-xs text-muted mt-1">数据源接入知识图谱服务后启用（当前为静态占位）。</p>
+                </div>
+
+                <!-- 难度 + 生成数量 -->
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">难度</label>
+                    <select v-model="difficulty" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford cursor-pointer">
+                      <option v-for="d in aiDifficulties" :key="d.value" :value="d.value">{{ d.label }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">生成数量</label>
+                    <select v-model.number="count" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford cursor-pointer">
+                      <option :value="1">1 题</option>
+                      <option :value="3">3 题</option>
+                      <option :value="5">5 题</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- 变体勾选 + 蓝本题占位 -->
+                <div class="space-y-3">
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input v-model="generateVariants" type="checkbox" class="w-4 h-4 rounded border-accent text-oxford focus:ring-oxford">
+                    <span class="text-sm text-ink">基于真题变体</span>
+                  </label>
+                  <div v-if="generateVariants" class="pl-6 border-l border-accent/40">
+                    <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">蓝本题（占位）</label>
+                    <input
+                      v-model="variantBaseId"
+                      type="text"
+                      class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford"
+                      placeholder="输入真题 ID 或稍后浏览选择">
+                    <p class="text-xs text-muted mt-1">完整蓝本题浏览弹窗后续迭代实现。</p>
+                  </div>
+                </div>
+
+                <!-- 生成按钮 -->
+                <button
+                  @click="generate"
+                  :disabled="generating || selectedTypes.length === 0"
+                  class="btn-feedback w-full bg-oxford text-white py-3 rounded-lg font-semibold text-sm hover:bg-oxford-hover disabled:opacity-50 flex items-center justify-center gap-2">
+                  <span v-if="generating">生成中…</span>
+                  <span v-else>生成题目</span>
+                </button>
+              </div>
+
+              <!-- --- 手动录入子模式 --- -->
+              <div v-show="subMode === 'manual'" class="bg-white border border-accent/40 rounded-lg p-5 card-labnote space-y-4">
+                <h2 class="font-serif text-lg font-bold text-oxford">手动录入题目</h2>
+
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">题型（9 种）</label>
+                    <select v-model="manualForm.type" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford cursor-pointer">
+                      <option v-for="t in allTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">难度（4 档）</label>
+                    <select v-model="manualForm.difficulty" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford cursor-pointer">
+                      <option v-for="d in allDifficulties" :key="d.value" :value="d.value">{{ d.label }}</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">题干</label>
+                  <textarea v-model="manualForm.stem" rows="4" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford font-mono" placeholder="题干内容，化学式用 \ce{H2O} 表示"></textarea>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">化学方程式（用于安全审核）</label>
+                  <input v-model="manualForm.equation" type="text" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford font-mono" placeholder="如 2H2 + O2 -> 2H2O">
+                  <p class="text-xs text-muted mt-1">提交时调用四维安全审核接口，返回通过 / 驳回。</p>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">参考答案</label>
+                  <input v-model="manualForm.answer" type="text" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford" placeholder="标准答案">
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">解析</label>
+                  <textarea v-model="manualForm.analysis" rows="3" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford" placeholder="解题思路与解析"></textarea>
+                </div>
+
+                <button
+                  @click="submitManual"
+                  :disabled="!manualForm.stem.trim()"
+                  class="btn-feedback w-full bg-oxford text-white py-3 rounded-lg font-semibold text-sm hover:bg-oxford-hover disabled:opacity-50">
+                  保存题目
+                </button>
+              </div>
+
+              <!-- --- OCR 导入子模式 --- -->
+              <div v-show="subMode === 'ocr'" class="bg-white border border-accent/40 rounded-lg p-5 card-labnote space-y-4">
+                <h2 class="font-serif text-lg font-bold text-oxford">OCR 导入试卷</h2>
+                <div class="border-2 border-dashed border-accent/50 rounded-lg p-8 text-center space-y-3">
+                  <div class="text-3xl">📄</div>
+                  <p class="text-sm text-muted">拖拽试卷图片到此处，或点击选择文件</p>
+                  <button @click="notImplemented('OCR 选择文件')" class="btn-feedback bg-teal text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-teal-hover">选择文件</button>
+                  <p class="text-xs text-muted">OCR 识别流水线后续接入（当前为占位）。支持 JPG/PNG/PDF，单批 ≤10 张。</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- ============ 右列：题目列表 ============ -->
+            <div class="lg:col-span-8">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="font-serif text-lg font-bold text-oxford">生成结果（{{ questions.length }}）</h2>
+                <button @click="notImplemented('导出')" class="px-3 py-1.5 border border-accent/40 rounded-lg text-sm text-muted hover:bg-white transition-colors">导出</button>
+              </div>
+
+              <!-- 空状态（EMPTYSTATE） -->
+              <div v-if="questions.length === 0" class="bg-white border border-accent/40 rounded-lg p-10 text-center space-y-2">
+                <div class="text-4xl">🧪</div>
+                <p class="text-muted text-sm">点击上方「生成题目」开始出题，或切换到「手动录入」/「OCR 导入」。</p>
+              </div>
+
+              <!-- 题目卡片列表 -->
+              <div v-for="(q, i) in questions" :key="q.id" class="space-y-4">
+                <div
+                  class="bg-white border border-accent/40 rounded-lg p-5 relative"
+                  :class="q.overallStatus === 'blocked' ? 'opacity-70 border-block/40' : ''">
+                  <div class="flex items-start gap-3">
+                    <span class="font-serif text-2xl font-bold leading-none"
+                          :class="q.overallStatus === 'blocked' ? 'text-block' : 'text-oxford'">
+                      {{ String(i + 1).padStart(2, '0') }}
+                    </span>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2 flex-wrap mb-1">
+                        <h3 class="font-medium text-ink">{{ q.title }}</h3>
+                        <span class="px-2 py-0.5 rounded text-xs font-medium"
+                              :class="difficultyBadgeClass(q.difficulty)">{{ q.difficultyLabel }}</span>
+                        <span class="px-2 py-0.5 rounded text-xs font-medium bg-bg-warm text-oxford border border-accent/40">{{ q.typeLabel }}</span>
+                      </div>
+                      <p class="text-sm text-ink leading-relaxed katex-target" v-html="renderStem(q.stem)"></p>
+                      <div v-if="q.analysis" class="mt-2 bg-paper border border-accent/30 rounded p-3 text-sm text-muted">
+                        <span class="text-muted font-semibold">解析：</span>{{ q.analysis }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 四维审核徽章（AUDITMARK） -->
+                  <div class="mt-4 pt-3 border-t border-accent/30 flex flex-wrap gap-2">
+                    <span
+                      v-for="dim in dimOrder" :key="dim.key"
+                      class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border"
+                      :class="auditBadgeClass(q.audit[dim.key].status)"
+                      :title="q.audit[dim.key].message">
+                      <span>{{ auditIcon(q.audit[dim.key].status) }}</span>
+                      {{ dim.label }}·{{ q.audit[dim.key].message }}
+                    </span>
+                  </div>
+
+                  <!-- 整体阻断标识 -->
+                  <div v-if="q.overallStatus === 'blocked'" class="mt-2 text-xs text-block font-medium">
+                    ✗ 该题目存在安全审核阻断，不会出现在学生端。
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ======================= Tab 2：题库管理 ======================= -->
+        <section v-show="activeTab === 'bank'" class="bg-white border border-accent/40 rounded-lg p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="font-serif text-xl font-bold text-oxford">学科题库</h2>
+            <button @click="notImplemented('新建目录')" class="text-muted hover:text-oxford">＋ 新建目录</button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div v-for="item in bankItems" :key="item.id" class="bg-paper border border-accent/40 rounded-lg p-4 cursor-pointer hover:border-oxford transition-colors">
+              <div class="flex items-center justify-between mb-2">
+                <span class="px-2 py-0.5 rounded text-xs font-semibold bg-bg-warm text-oxford">{{ item.subject }}</span>
+                <span class="text-xs text-muted">ID: {{ item.id }}</span>
+              </div>
+              <h4 class="font-medium text-ink text-sm mb-1">{{ item.title }}</h4>
+              <p class="text-xs text-muted line-clamp-2">{{ item.excerpt }}</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ======================= Tab 3：历史真题库 ======================= -->
+        <section v-show="activeTab === 'history'" class="space-y-4">
+          <div class="flex flex-col md:flex-row gap-4">
+            <input type="text" placeholder="试卷名称 / 关键字…" class="flex-1 px-3 py-2.5 bg-white border border-accent/40 rounded-lg text-sm outline-none focus:border-oxford">
+            <select class="px-3 py-2.5 bg-white border border-accent/40 rounded-lg text-sm outline-none cursor-pointer">
+              <option>北京</option><option>上海</option><option>全国卷</option><option>江苏</option><option>浙江</option>
+            </select>
+            <select class="px-3 py-2.5 bg-white border border-accent/40 rounded-lg text-sm outline-none cursor-pointer">
+              <option>2024</option><option>2023</option><option>2022</option><option>2021</option>
+            </select>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div v-for="exam in historyExams" :key="exam.id" class="bg-white border border-accent/40 rounded-lg p-5 hover:border-oxford transition-colors">
+              <div class="flex items-center justify-between mb-2">
+                <span class="px-2 py-0.5 rounded bg-teal text-white text-xs font-semibold">{{ exam.region }}</span>
+                <span class="text-xs text-muted">{{ exam.year }}</span>
+              </div>
+              <h3 class="font-medium text-ink text-sm mb-3">{{ exam.title }}</h3>
+              <div class="flex justify-between items-center text-xs">
+                <span class="text-muted">{{ exam.count }} 道题</span>
+                <span @click="notImplemented('查看详情')" class="text-teal font-medium cursor-pointer hover:underline">查看详情</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ======================= Tab 4：考试列表 ======================= -->
+        <section v-show="activeTab === 'exams'" class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="font-serif text-xl font-bold text-oxford">考试列表</h2>
+            <button @click="notImplemented('创建考试')" class="btn-feedback bg-oxford text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-oxford-hover">＋ 创建考试</button>
+          </div>
+          <div class="space-y-3">
+            <div v-for="exam in examList" :key="exam.id" class="bg-white border border-accent/40 border-l-4 rounded-lg p-5 flex items-center justify-between"
+                 :class="exam.statusClass">
+              <div>
+                <h3 class="font-medium text-ink">{{ exam.title }}</h3>
+                <p class="text-sm text-muted">{{ exam.date }}</p>
+              </div>
+              <span class="px-3 py-1 rounded-full text-xs font-semibold" :class="exam.badgeClass">{{ exam.status }}</span>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const { createApp, ref, reactive } = Vue;
+
+    // ---------- 词汇表（与 question-vocabulary spec 对齐） ----------
+    const AI_TYPES = [
+      { value: 'single_choice', label: '选择题' },
+      { value: 'fill_blank', label: '填空题' },
+      { value: 'calculation', label: '计算题' },
+      { value: 'experiment', label: '实验题' },
+      { value: 'inference', label: '推断题' },
+    ];
+
+    const ALL_TYPES = [
+      { value: 'single_choice', label: '单项选择题' },
+      { value: 'multi_choice', label: '多项选择题' },
+      { value: 'true_false', label: '判断题' },
+      { value: 'fill_blank', label: '填空题' },
+      { value: 'short_answer', label: '简答题' },
+      { value: 'essay', label: '论述题' },
+      { value: 'calculation', label: '计算题' },
+      { value: 'experiment', label: '实验题' },
+      { value: 'inference', label: '推断题' },
+    ];
+
+    const AI_DIFFICULTIES = [
+      { value: 'easy', label: '简单' },
+      { value: 'medium', label: '中等' },
+      { value: 'hard', label: '困难' },
+    ];
+    const ALL_DIFFICULTIES = [...AI_DIFFICULTIES, { value: 'competition', label: '竞赛' }];
+
+    // 四维审核维度（对齐 four-dimension-safety-audit 的 balance/condition/product/structure）
+    const DIM_ORDER = [
+      { key: 'balance', label: '系数' },
+      { key: 'condition', label: '条件' },
+      { key: 'product', label: '产物' },
+      { key: 'structure', label: '结构' },
+    ];
+
+    // ---------- Mock 生成结果（演示三态徽章） ----------
+    const MOCK_QUESTIONS = [
+      {
+        id: 'q_001', title: '酸碱中和反应计算', type: 'calculation', typeLabel: '计算题',
+        difficulty: 'medium', difficultyLabel: '中等',
+        stem: '常温下，将 $20.0\\ \\mathrm{mL}$ 的 $0.10\\ \\mathrm{mol/L}$ $\\ce{NaOH}$ 溶液滴加到 $20.0\\ \\mathrm{mL}$ 的 $0.10\\ \\mathrm{mol/L}$ $\\ce{CH3COOH}$ 溶液中，求混合后溶液的 pH 值。（已知 $\\ce{CH3COOH}$ 的 $K_a = 1.8 \\times 10^{-5}$）',
+        analysis: '恰好完全中和生成 $\\ce{CH3COONa}$，浓度为 $0.05\\ \\mathrm{mol/L}$，发生水解，$\\mathrm{pH} \\approx 8.72$。',
+        audit: {
+          balance: { status: 'passed', message: '配平正确' },
+          condition: { status: 'passed', message: '条件完备' },
+          product: { status: 'passed', message: '产物合理' },
+          structure: { status: 'passed', message: '格式规范' },
+        },
+        overallStatus: 'passed', overallMessage: '四维审核全部通过',
+      },
+      {
+        id: 'q_002', title: '酸碱中和滴定误差分析', type: 'single_choice', typeLabel: '选择题',
+        difficulty: 'hard', difficultyLabel: '困难',
+        stem: '用标准盐酸滴定未知浓度的氨水，若指示剂选择酚酞，滴定终点时溶液的颜色变化及对测定结果的影响是什么？',
+        analysis: '酚酞变色范围偏碱性，终点提前到达，导致测定结果偏低，应改用甲基橙。',
+        audit: {
+          balance: { status: 'passed', message: '配平正确' },
+          condition: { status: 'warning', message: '指示剂选择不当' },
+          product: { status: 'passed', message: '产物合理' },
+          structure: { status: 'passed', message: '格式规范' },
+        },
+        overallStatus: 'passed', overallMessage: '存在 1 项警告，建议复核',
+      },
+      {
+        id: 'q_003', title: '复杂混合物反应计算', type: 'calculation', typeLabel: '计算题',
+        difficulty: 'hard', difficultyLabel: '困难',
+        stem: '将 $5.0\\ \\mathrm{g}$ 钠投入到 $10\\ \\mathrm{mL}$ 浓硫酸中，计算产生的气体体积（标准状况）。',
+        analysis: '钠与浓硫酸反应剧烈，实际发生复杂副反应，题目参数存在安全风险，已阻断。',
+        audit: {
+          balance: { status: 'blocked', message: '配平错误' },
+          condition: { status: 'warning', message: '条件缺失' },
+          product: { status: 'failed', message: '产物不唯一' },
+          structure: { status: 'passed', message: '格式规范' },
+        },
+        overallStatus: 'blocked', overallMessage: '安全审核阻断，需重新生成',
+      },
+    ];
+
+    const BANK_ITEMS = [
+      { id: 'C-2938', subject: '化学', title: '关于化学反应速率和限度的描述', excerpt: '在恒温恒容条件下，下列各项能说明反应已达到平衡状态的是…' },
+      { id: 'C-5521', subject: '化学', title: '氧化还原反应配平', excerpt: '配平下列化学方程式：$\\ce{KMnO4 + HCl -> KCl + MnCl2 + Cl2 + H2O}$' },
+      { id: 'P-1102', subject: '物理', title: '牛顿第二定律的应用', excerpt: '一个质量为 m 的物体在水平恒力 F 的作用下由静止开始运动…' },
+      { id: 'B-4451', subject: '生物', title: '细胞呼吸的过程分析', excerpt: '有氧呼吸的三个阶段中，产生 ATP 最多的阶段是…' },
+      { id: 'P-8829', subject: '物理', title: '动能定理综合应用', excerpt: '一小球从高处落下，进入泥潭后停止运动…' },
+      { id: 'B-1023', subject: '生物', title: '遗传规律计算题', excerpt: '已知某植物的花色受两对独立遗传的等位基因控制…' },
+    ];
+
+    const HISTORY_EXAMS = [
+      { id: 'h1', region: '北京', year: '2024', title: '2024 年普通高等学校招生全国统一考试（北京卷）化学', count: 28 },
+      { id: 'h2', region: '全国卷', year: '2023', title: '2023 年普通高等学校招生全国统一考试（全国卷）化学', count: 32 },
+      { id: 'h3', region: '上海', year: '2022', title: '2022 年普通高等学校招生全国统一考试（上海卷）化学', count: 24 },
+    ];
+
+    const EXAM_LIST = [
+      { id: 'e1', title: '高一化学期中考试', date: '2024-11-15', status: '进行中', statusClass: 'border-l-teal', badgeClass: 'bg-bg-warm text-teal' },
+      { id: 'e2', title: '高二物理月考', date: '2024-10-20', status: '已结束', statusClass: 'border-l-muted', badgeClass: 'bg-paper text-muted' },
+      { id: 'e3', title: '高三生物模拟测试', date: '2024-12-01', status: '草稿', statusClass: 'border-l-accent', badgeClass: 'bg-warn-bg text-warn' },
+    ];
+
+    createApp({
+      setup() {
+        const tabs = [
+          { value: 'workbench', label: '出题工作台' },
+          { value: 'bank', label: '题库管理' },
+          { value: 'history', label: '历史真题库' },
+          { value: 'exams', label: '考试列表' },
+        ];
+        const subModes = [
+          { value: 'ai', label: 'AI 生成' },
+          { value: 'manual', label: '手动录入' },
+          { value: 'ocr', label: 'OCR 导入' },
+        ];
+
+        const activeTab = ref('workbench');
+        const subMode = ref('ai');
+        const selectedTypes = ref(['single_choice']);
+        const difficulty = ref('medium');
+        const count = ref(3);
+        const knowledgePoint = ref('');
+        const generateVariants = ref(false);
+        const variantBaseId = ref('');
+        const questions = ref([]);
+        const generating = ref(false);
+
+        const manualForm = reactive({
+          type: 'single_choice', difficulty: 'easy', stem: '', equation: '', answer: '', analysis: '',
+        });
+
+        const aiTypes = AI_TYPES;
+        const allTypes = ALL_TYPES;
+        const aiDifficulties = AI_DIFFICULTIES;
+        const allDifficulties = ALL_DIFFICULTIES;
+        const dimOrder = DIM_ORDER;
+        const bankItems = BANK_ITEMS;
+        const historyExams = HISTORY_EXAMS;
+        const examList = EXAM_LIST;
+
+        function toggleType(v) {
+          const i = selectedTypes.value.indexOf(v);
+          if (i >= 0) selectedTypes.value.splice(i, 1);
+          else selectedTypes.value.push(v);
+        }
+        function isTypeSelected(v) { return selectedTypes.value.includes(v); }
+
+        // 模拟生成：真实调用 GET /api/generate（后端出题服务落地后接入）
+        async function generate() {
+          generating.value = true;
+          await new Promise(r => setTimeout(r, 600)); // 模拟延迟
+          questions.value = MOCK_QUESTIONS.slice(0, count.value).map(q => ({ ...q, audit: JSON.parse(JSON.stringify(q.audit)) }));
+          generating.value = false;
+        }
+
+        // 调用后端四维安全审核接口（审核接口在临时白名单内免认证）。
+        // 返回 AuditReport JSON；非 2xx 或网络异常返回 null，由调用方降级为「待审核」。
+        async function auditEquation(eq) {
+          const resp = await fetch('/api/audit/equation?eq=' + encodeURIComponent(eq));
+          if (!resp.ok) return null;
+          return resp.json();
+        }
+
+        async function submitManual() {
+          // 出题 → 提交审核：手动录入的化学方程式送后端四维审核，得通过 / 驳回
+          let report = null;
+          if (manualForm.equation.trim()) {
+            try {
+              report = await auditEquation(manualForm.equation.trim());
+            } catch (e) {
+              report = null; // 网络 / 解析失败降级为待审核
+            }
+          }
+          questions.value = [{
+            id: 'q_' + Date.now(),
+            title: allTypes.find(t => t.value === manualForm.type)?.label + '（手动录入）',
+            type: manualForm.type,
+            typeLabel: allTypes.find(t => t.value === manualForm.type)?.label || manualForm.type,
+            difficulty: manualForm.difficulty,
+            difficultyLabel: allDifficulties.find(d => d.value === manualForm.difficulty)?.label || manualForm.difficulty,
+            stem: manualForm.stem,
+            analysis: escapeHtml(manualForm.analysis),
+            audit: report
+              ? {
+                  balance: { status: report.audits.balance.status, message: report.audits.balance.message },
+                  condition: { status: report.audits.condition.status, message: report.audits.condition.message },
+                  product: { status: report.audits.product.status, message: report.audits.product.message },
+                  structure: { status: report.audits.structure.status, message: report.audits.structure.message },
+                }
+              : Object.fromEntries(DIM_ORDER.map(d => [d.key, { status: 'pending', message: '待审核' }])),
+            overallStatus: report ? report.overall_status : 'pending',
+            overallMessage: report ? report.overall_message : '待审核',
+          }, ...questions.value];
+          manualForm.stem = ''; manualForm.equation = ''; manualForm.answer = ''; manualForm.analysis = '';
+        }
+
+        // 审核状态 → 图标/样式查表（含 pending 待审核态；blocked 与 failed 同为阻断红）
+        const AUDIT_STATUS_MAP = {
+          passed: { icon: '✓', cls: 'bg-pass-bg text-pass border-pass/30' },
+          warning: { icon: '⚠', cls: 'bg-warn-bg text-warn border-warn/30' },
+          blocked: { icon: '✗', cls: 'bg-block-bg text-block border-block/30' },
+          failed: { icon: '✗', cls: 'bg-block-bg text-block border-block/30' },
+          pending: { icon: '…', cls: 'bg-paper text-muted border-accent/40' },
+        };
+        function auditIcon(status) {
+          return (AUDIT_STATUS_MAP[status] || AUDIT_STATUS_MAP.pending).icon;
+        }
+        function auditBadgeClass(status) {
+          return (AUDIT_STATUS_MAP[status] || AUDIT_STATUS_MAP.pending).cls;
+        }
+        // 难度 → 样式查表
+        const DIFFICULTY_CLASS_MAP = {
+          easy: 'bg-bg-warm text-teal',
+          medium: 'bg-bg-warm text-oxford',
+          hard: 'bg-block-bg text-block',
+          competition: 'bg-warn-bg text-warn',
+        };
+        function difficultyBadgeClass(d) {
+          return DIFFICULTY_CLASS_MAP[d] || DIFFICULTY_CLASS_MAP.competition;
+        }
+
+        function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+        // 占位功能提示：原型阶段尚未接入的功能，点击给出明确反馈而非无响应
+        function notImplemented(feature) {
+          alert(`${feature}：该功能开发中，将在后续版本开放。`);
+        }
+
+        // 将题干中的 LaTeX 公式（行内 $...$ 与块级 $$...$$）渲染为 KaTeX HTML。
+        // 用 renderToString 生成字符串经 v-html 输出，而非 renderMathInElement
+        // 直接改写 Vue 管理的 DOM（后者会在后续重渲染时 v-dom 对不上而崩溃）。
+        // 文本段统一 escapeHtml 防注入；公式段交给 KaTeX（保留 -> 等箭头不被转义）。
+        function renderStem(stem) {
+          if (typeof stem !== 'string') return '';
+          if (!window.katex) return escapeHtml(stem);
+          return stem
+            .split(/(\$\$[^$]+\$\$|\$[^$]+\$)/g)
+            .map(function (part) {
+              let display = false;
+              let latex = null;
+              if (/^\$\$[^$]+\$\$$/.test(part)) {
+                display = true;
+                latex = part.slice(2, -2);
+              } else if (/^\$[^$]+\$$/.test(part)) {
+                latex = part.slice(1, -1);
+              } else {
+                return escapeHtml(part);
+              }
+              try {
+                return katex.renderToString(latex, { displayMode: display, throwOnError: false });
+              } catch (e) {
+                return escapeHtml(part);
+              }
+            })
+            .join('');
+        }
+
+        return {
+          tabs, subModes, activeTab, subMode,
+          aiTypes, allTypes, aiDifficulties, allDifficulties, dimOrder,
+          selectedTypes, difficulty, count, knowledgePoint,
+          generateVariants, variantBaseId, questions, generating,
+          manualForm, bankItems, historyExams, examList,
+          toggleType, isTypeSelected, generate, submitManual,
+          auditIcon, auditBadgeClass, difficultyBadgeClass, renderStem, notImplemented,
+        };
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>

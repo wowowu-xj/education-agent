@@ -1,0 +1,33 @@
+{
+  "condition_keywords": {
+    "点燃": ["点燃"],
+    "加热": ["加热", "△", "\\triangle"],
+    "高温": ["高温"],
+    "催化剂": ["催化剂", "MnO2催化", "Cu催化", "Fe催化", "MnO_2"],
+    "通电": ["通电", "电解"],
+    "光照": ["光照", "光"],
+    "加压": ["加压", "高压"],
+    "一定条件": ["一定条件"],
+    "浓": ["浓", "浓硫酸", "浓硝酸", "浓盐酸"],
+    "稀": ["稀", "稀硫酸", "稀硝酸", "稀盐酸"],
+    "过量": ["过量"],
+    "足量": ["足量"],
+    "适量": ["适量"],
+    "高温高压": ["高温高压"]
+  },
+  "reaction_condition_rules": [
+    {"triggers": ["CH4", "C2H5OH", "C6H12O6", "S", "P", "Fe"], "required": "点燃", "severity": "failed"},
+    {"triggers": ["H2O2", "KClO3", "KMnO4"], "required": "催化剂", "severity": "warning"},
+    {"triggers": ["浓H2SO4", "浓硫酸"], "required": "浓", "severity": "failed"},
+    {"triggers": ["稀H2SO4", "稀硫酸", "稀HCl", "稀盐酸"], "required": "稀", "severity": "warning"},
+    {"triggers": ["CaCO3", "NaHCO3"], "required": "加热", "severity": "failed"},
+    {"triggers": ["浓H2SO4"], "required": "加热", "severity": "failed", "note": "酯化反应"},
+    {"triggers": ["HClO", "AgCl", "AgBr"], "required": "光照", "severity": "failed"}
+  ],
+  "contradiction_pairs": [
+    ["浓", "稀"],
+    ["过量", "适量"],
+    ["点燃", "通电"],
+    ["高温", "加热"]
+  ]
+}

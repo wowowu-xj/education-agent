@@ -18,3 +18,7 @@
 
 # Dependencies
 node_modules/
+
+# Graphify generated output
+graphify-out/
+.gstack/
