@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>学生端 · ChemAI 智辅化学</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { oxford: '#002147', teal: '#0d7377', paper: '#faf8f5', muted: '#6b7280', ink: '#1a1a2e' },
+          fontFamily: {
+            serif: ['Cormorant Garamond', 'Noto Serif SC', 'serif'],
+            sans: ['IBM Plex Sans', 'Noto Sans SC', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+</head>
+<body class="bg-paper text-ink font-sans antialiased min-h-screen flex items-center justify-center">
+  <div class="text-center space-y-3 px-6">
+    <h1 class="font-serif text-4xl font-bold text-oxford">ChemAI</h1>
+    <p class="text-sm text-muted tracking-widest uppercase">智辅化学 · 学生端</p>
+    <p class="pt-4 text-sm text-muted">学生端建设中，敬请期待。</p>
+    <button
+      onclick="localStorage.removeItem('chemai_access_token');localStorage.removeItem('chemai_refresh_token');localStorage.removeItem('chemai_user_role');location.href='/pages/login.html'"
+      class="mt-4 px-4 py-2 bg-oxford text-white rounded-lg text-sm font-semibold hover:opacity-90">返回登录</button>
+  </div>
+</body>
+</html>
