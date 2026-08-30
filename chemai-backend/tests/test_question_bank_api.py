@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
@@ -27,6 +28,7 @@ from app.models import (
     Account,
     Class,
     Exam,
+    ExamStatusTransition,
     Grade,
     Paper,
     PaperQuestion,
@@ -34,6 +36,7 @@ from app.models import (
     QuestionSet,
     School,
     Teacher,
+    TeacherClassSubject,
 )
 
 
@@ -177,6 +180,27 @@ def _publish(client: TestClient, auth: dict, paper_id: int, class_ids: list[int]
     return resp.json()
 
 
+def _publish_and_get_exam(client: TestClient, auth: dict, seeded: dict) -> int:
+    """建题 → 组卷 → 发布到主班，返回 exam_id。"""
+    q = _create_question(client, auth)
+    paper = _create_paper(client, auth)
+    _add_question_to_paper(client, auth, paper["id"], q["id"])
+    return _publish(client, auth, paper["id"], [seeded["class_id"]])["exam_ids"][0]
+
+
+def _transitions(engine: Engine, exam_id: int) -> list[ExamStatusTransition]:
+    """按 id 升序取某考试的全部迁移日志。"""
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    s = factory()
+    rows = s.execute(
+        select(ExamStatusTransition)
+        .where(ExamStatusTransition.exam_id == exam_id)
+        .order_by(ExamStatusTransition.id)
+    ).scalars().all()
+    s.close()
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # 题库 CRUD（Section 2）
 # ---------------------------------------------------------------------------
@@ -211,18 +235,74 @@ class TestQuestionCrud:
 
         resp = client.get("/api/questions", headers=auth)
         assert resp.status_code == 200
-        assert len(resp.json()) == 2
+        assert resp.json()["total"] == 2
+        assert len(resp.json()["items"]) == 2
 
         # 按题型
-        assert len(client.get("/api/questions?type=calculation", headers=auth).json()) == 1
+        assert client.get("/api/questions?type=calculation", headers=auth).json()["total"] == 1
         # 按难度
-        assert len(client.get("/api/questions?difficulty=hard", headers=auth).json()) == 1
+        assert client.get("/api/questions?difficulty=hard", headers=auth).json()["total"] == 1
         # 按知识点
         assert (
-            len(client.get("/api/questions?knowledge_point=摩尔计算", headers=auth).json()) == 1
+            client.get("/api/questions?knowledge_point=摩尔计算", headers=auth).json()["total"] == 1
         )
         # 按地区/年份
-        assert len(client.get("/api/questions?region=全国&year=2024", headers=auth).json()) == 1
+        assert (
+            client.get("/api/questions?region=全国&year=2024", headers=auth).json()["total"] == 1
+        )
+
+    def test_list_questions_pagination(self, client: TestClient, auth: dict) -> None:
+        for i in range(3):
+            _create_question(client, auth, content=f"题目{i}", type="true_false")
+
+        page1 = client.get("/api/questions?page=1&page_size=2", headers=auth).json()
+        assert page1["total"] == 3
+        assert page1["page"] == 1
+        assert page1["page_size"] == 2
+        assert len(page1["items"]) == 2
+
+        page2 = client.get("/api/questions?page=2&page_size=2", headers=auth).json()
+        assert len(page2["items"]) == 1
+
+    def test_list_questions_page_out_of_range(self, client: TestClient, auth: dict) -> None:
+        _create_question(client, auth)
+        resp = client.get("/api/questions?page=99", headers=auth).json()
+        assert resp["items"] == []
+        assert resp["total"] == 1
+
+    def test_list_questions_page_and_size_clamped(self, client: TestClient, auth: dict) -> None:
+        _create_question(client, auth)
+        resp = client.get("/api/questions?page=0&page_size=200", headers=auth).json()
+        assert resp["page"] == 1
+        assert resp["page_size"] == 100
+        assert len(resp["items"]) == 1
+
+    def test_list_questions_combined_filter(self, client: TestClient, auth: dict) -> None:
+        _create_question(client, auth)  # single_choice / medium / 氧化还原反应
+        _create_question(
+            client,
+            auth,
+            content="计算题",
+            type="calculation",
+            difficulty="hard",
+            knowledge_points=["摩尔计算"],
+        )
+
+        # 题型 + 难度 + 知识点 AND 叠加
+        hit = client.get(
+            "/api/questions?type=calculation&difficulty=hard&knowledge_point=摩尔计算",
+            headers=auth,
+        ).json()
+        assert hit["total"] == 1
+        assert hit["items"][0]["content"] == "计算题"
+
+        # 部分不匹配的组合返回空
+        miss = client.get(
+            "/api/questions?type=calculation&difficulty=medium&knowledge_point=摩尔计算",
+            headers=auth,
+        ).json()
+        assert miss["total"] == 0
+        assert miss["items"] == []
 
     def test_get_update_delete_question(self, client: TestClient, auth: dict) -> None:
         data = _create_question(client, auth)
@@ -248,6 +328,64 @@ class TestQuestionCrud:
 
         resp = client.delete(f"/api/questions/{q['id']}", headers=auth)
         assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# 题库批量导入（Section 2）
+# ---------------------------------------------------------------------------
+
+
+class TestQuestionBatchImport:
+    def test_batch_preview_validates_without_persisting(self, client: TestClient, auth: dict) -> None:
+        payload = {
+            "items": [
+                _question_payload(),  # 合法
+                {**_question_payload(), "type": "bogus_type"},  # 非法题型
+                {"content": "缺必填 answer", "type": "calculation", "difficulty": "hard"},  # 缺 answer
+            ]
+        }
+        resp = client.post("/api/questions/batch/preview", json=payload, headers=auth)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["valid_count"] == 1
+        assert data["invalid_count"] == 2
+        assert data["items"][0]["valid"] is True
+        assert data["items"][1]["valid"] is False
+        assert data["items"][1]["errors"]
+        assert data["items"][2]["valid"] is False
+        # 预览不落库
+        assert client.get("/api/questions", headers=auth).json()["total"] == 0
+
+    def test_batch_commit_partial_success(self, client: TestClient, auth: dict) -> None:
+        payload = {
+            "items": [
+                _question_payload(),  # 成功
+                {**_question_payload(), "type": "bogus_type"},  # 失败
+                _question_payload(content="第二题", type="true_false"),  # 成功
+            ]
+        }
+        resp = client.post("/api/questions/batch/commit", json=payload, headers=auth)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success_count"] == 2
+        assert data["failed_count"] == 1
+        statuses = {r["index"]: r["status"] for r in data["results"]}
+        assert statuses[0] == "created"
+        assert statuses[1] == "failed"
+        assert statuses[2] == "created"
+        # 落库 2 题，归属当前教师
+        listed = client.get("/api/questions", headers=auth).json()
+        assert listed["total"] == 2
+        assert all(q["teacher_id"] is not None for q in listed["items"])
+
+    def test_batch_commit_isolates_by_teacher(
+        self, client: TestClient, auth: dict, seeded: dict, engine: Engine
+    ) -> None:
+        payload = {"items": [_question_payload()]}
+        assert client.post("/api/questions/batch/commit", json=payload, headers=auth).status_code == 200
+
+        other_auth = _seed_other_teacher(engine, seeded["school_id"])
+        assert client.get("/api/questions", headers=other_auth).json()["total"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +481,57 @@ class TestQuestionSetCrud:
         assert detail["question_count"] == 1
         listed = client.get("/api/question-sets", headers=auth).json()
         assert listed[0]["question_count"] == 1
+
+
+class TestQuestionSetQuestions:
+    def test_list_set_questions_sorted_by_sort_order(self, client: TestClient, auth: dict) -> None:
+        q1 = _create_question(client, auth)  # 默认题干含「氧化还原」
+        q2 = _create_question(client, auth, content="第二题", type="true_false")
+        set_obj = client.post("/api/question-sets", json={"name": "专题"}, headers=auth).json()
+
+        client.post(
+            f"/api/question-sets/{set_obj['id']}/questions",
+            json={"question_id": q1["id"], "sort_order": 5},
+            headers=auth,
+        )
+        client.post(
+            f"/api/question-sets/{set_obj['id']}/questions",
+            json={"question_id": q2["id"], "sort_order": 0},
+            headers=auth,
+        )
+
+        resp = client.get(f"/api/question-sets/{set_obj['id']}/questions", headers=auth)
+        assert resp.status_code == 200
+        assert [q["id"] for q in resp.json()] == [q2["id"], q1["id"]]
+
+    def test_list_set_questions_excludes_soft_deleted(self, client: TestClient, auth: dict) -> None:
+        q1 = _create_question(client, auth)
+        q2 = _create_question(client, auth, content="第二题", type="true_false")
+        set_obj = client.post("/api/question-sets", json={"name": "专题"}, headers=auth).json()
+
+        client.post(
+            f"/api/question-sets/{set_obj['id']}/questions",
+            json={"question_id": q1["id"]},
+            headers=auth,
+        )
+        client.post(
+            f"/api/question-sets/{set_obj['id']}/questions",
+            json={"question_id": q2["id"]},
+            headers=auth,
+        )
+        assert client.delete(f"/api/questions/{q2['id']}", headers=auth).status_code == 204
+
+        resp = client.get(f"/api/question-sets/{set_obj['id']}/questions", headers=auth)
+        assert resp.status_code == 200
+        assert [q["id"] for q in resp.json()] == [q1["id"]]
+
+    def test_list_set_questions_other_teacher_404(
+        self, client: TestClient, auth: dict, seeded: dict, engine: Engine
+    ) -> None:
+        set_obj = client.post("/api/question-sets", json={"name": "专题"}, headers=auth).json()
+        other_auth = _seed_other_teacher(engine, seeded["school_id"])
+        resp = client.get(f"/api/question-sets/{set_obj['id']}/questions", headers=other_auth)
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -442,14 +631,8 @@ class TestPaperAndPublish:
 
 
 class TestExamStateMachine:
-    def _publish_and_get_exam(self, client: TestClient, auth: dict, seeded: dict) -> int:
-        q = _create_question(client, auth)
-        paper = _create_paper(client, auth)
-        _add_question_to_paper(client, auth, paper["id"], q["id"])
-        return _publish(client, auth, paper["id"], [seeded["class_id"]])["exam_ids"][0]
-
     def test_exam_list_filter(self, client: TestClient, auth: dict, seeded: dict) -> None:
-        exam_id = self._publish_and_get_exam(client, auth, seeded)
+        exam_id = _publish_and_get_exam(client, auth, seeded)
         assert len(client.get("/api/exams", headers=auth).json()) == 1
         assert (
             len(
@@ -463,24 +646,24 @@ class TestExamStateMachine:
         assert len(client.get("/api/exams?status_filter=cancelled", headers=auth).json()) == 0
 
     def test_cancel_published_exam(self, client: TestClient, auth: dict, seeded: dict) -> None:
-        exam_id = self._publish_and_get_exam(client, auth, seeded)
+        exam_id = _publish_and_get_exam(client, auth, seeded)
         resp = client.post(f"/api/exams/{exam_id}/cancel", headers=auth)
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
 
     def test_cancel_cancelled_exam_409(self, client: TestClient, auth: dict, seeded: dict) -> None:
-        exam_id = self._publish_and_get_exam(client, auth, seeded)
+        exam_id = _publish_and_get_exam(client, auth, seeded)
         client.post(f"/api/exams/{exam_id}/cancel", headers=auth)
         resp = client.post(f"/api/exams/{exam_id}/cancel", headers=auth)
         assert resp.status_code == 409
 
     def test_finalize_published_exam_409(self, client: TestClient, auth: dict, seeded: dict) -> None:
-        exam_id = self._publish_and_get_exam(client, auth, seeded)
+        exam_id = _publish_and_get_exam(client, auth, seeded)
         resp = client.post(f"/api/exams/{exam_id}/finalize", headers=auth)
         assert resp.status_code == 409
 
     def test_finalize_grading_exam(self, client: TestClient, auth: dict, seeded: dict, engine: Engine) -> None:
-        exam_id = self._publish_and_get_exam(client, auth, seeded)
+        exam_id = _publish_and_get_exam(client, auth, seeded)
         # 手动把状态推到 grading（学生作答链路的触发点本期 defer）
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         s = factory()
@@ -495,6 +678,90 @@ class TestExamStateMachine:
 
 
 # ---------------------------------------------------------------------------
+# 考试全生命周期（change C）：迁移审计 + 开考/收卷/归档
+# ---------------------------------------------------------------------------
+
+
+class TestExamTransitionAudit:
+    def test_cancel_records_audit(
+        self, client: TestClient, auth: dict, seeded: dict, engine: Engine
+    ) -> None:
+        exam_id = _publish_and_get_exam(client, auth, seeded)
+        assert client.post(f"/api/exams/{exam_id}/cancel", headers=auth).status_code == 200
+
+        rows = _transitions(engine, exam_id)
+        assert len(rows) == 1
+        t = rows[0]
+        assert t.exam_id == exam_id
+        assert t.from_status == ExamStatus.PUBLISHED
+        assert t.to_status == ExamStatus.CANCELLED
+        assert t.operator_id == seeded["teacher_id"]
+        assert t.created_at is not None
+
+    def test_full_lifecycle_records_each_transition(
+        self, client: TestClient, auth: dict, seeded: dict, engine: Engine
+    ) -> None:
+        exam_id = _publish_and_get_exam(client, auth, seeded)
+        assert client.post(f"/api/exams/{exam_id}/start", headers=auth).status_code == 200
+        assert client.post(f"/api/exams/{exam_id}/collect", headers=auth).status_code == 200
+        assert client.post(f"/api/exams/{exam_id}/finalize", headers=auth).status_code == 200
+        assert client.post(f"/api/exams/{exam_id}/archive", headers=auth).status_code == 200
+
+        rows = _transitions(engine, exam_id)
+        assert [(r.from_status, r.to_status) for r in rows] == [
+            (ExamStatus.PUBLISHED, ExamStatus.IN_PROGRESS),
+            (ExamStatus.IN_PROGRESS, ExamStatus.GRADING),
+            (ExamStatus.GRADING, ExamStatus.COMPLETED),
+            (ExamStatus.COMPLETED, ExamStatus.ARCHIVED),
+        ]
+
+
+class TestExamLifecycleEndpoints:
+    def test_start_published(self, client: TestClient, auth: dict, seeded: dict) -> None:
+        exam_id = _publish_and_get_exam(client, auth, seeded)
+        resp = client.post(f"/api/exams/{exam_id}/start", headers=auth)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "in_progress"
+
+    def test_start_non_published_409(self, client: TestClient, auth: dict, seeded: dict) -> None:
+        exam_id = _publish_and_get_exam(client, auth, seeded)
+        client.post(f"/api/exams/{exam_id}/start", headers=auth)  # → in_progress
+        assert client.post(f"/api/exams/{exam_id}/start", headers=auth).status_code == 409
+
+    def test_collect_in_progress(self, client: TestClient, auth: dict, seeded: dict) -> None:
+        exam_id = _publish_and_get_exam(client, auth, seeded)
+        client.post(f"/api/exams/{exam_id}/start", headers=auth)
+        resp = client.post(f"/api/exams/{exam_id}/collect", headers=auth)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "grading"
+
+    def test_collect_non_in_progress_409(self, client: TestClient, auth: dict, seeded: dict) -> None:
+        exam_id = _publish_and_get_exam(client, auth, seeded)
+        assert client.post(f"/api/exams/{exam_id}/collect", headers=auth).status_code == 409
+
+    def test_archive_completed(self, client: TestClient, auth: dict, seeded: dict) -> None:
+        exam_id = _publish_and_get_exam(client, auth, seeded)
+        client.post(f"/api/exams/{exam_id}/start", headers=auth)
+        client.post(f"/api/exams/{exam_id}/collect", headers=auth)
+        client.post(f"/api/exams/{exam_id}/finalize", headers=auth)
+        resp = client.post(f"/api/exams/{exam_id}/archive", headers=auth)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "archived"
+
+    def test_archive_non_completed_409(self, client: TestClient, auth: dict, seeded: dict) -> None:
+        exam_id = _publish_and_get_exam(client, auth, seeded)
+        assert client.post(f"/api/exams/{exam_id}/archive", headers=auth).status_code == 409
+
+    def test_illegal_completed_to_published_409(self, client: TestClient, auth: dict, seeded: dict) -> None:
+        # completed 之后任何「回到 published」的尝试（如再开考）都应 409
+        exam_id = _publish_and_get_exam(client, auth, seeded)
+        client.post(f"/api/exams/{exam_id}/start", headers=auth)
+        client.post(f"/api/exams/{exam_id}/collect", headers=auth)
+        client.post(f"/api/exams/{exam_id}/finalize", headers=auth)  # → completed
+        assert client.post(f"/api/exams/{exam_id}/start", headers=auth).status_code == 409
+
+
+# ---------------------------------------------------------------------------
 # 数据隔离（Section 7.3）
 # ---------------------------------------------------------------------------
 
@@ -505,7 +772,7 @@ class TestDataIsolation:
         other_auth = _seed_other_teacher(engine, seeded["school_id"])
 
         # 他人题目不可见（列表为空、详情 404）
-        assert len(client.get("/api/questions", headers=other_auth).json()) == 0
+        assert client.get("/api/questions", headers=other_auth).json()["total"] == 0
         assert client.get(f"/api/questions/{q['id']}", headers=other_auth).status_code == 404
         # 删除也 404（被 teacher_id 过滤，视为不存在）
         assert client.delete(f"/api/questions/{q['id']}", headers=other_auth).status_code == 404
@@ -545,6 +812,38 @@ class TestDataIsolation:
             f"/api/papers/{paper['id']}/publish", json={"class_ids": [other_class_id]}, headers=auth
         )
         assert resp.status_code == 403
+
+
+class TestClassList:
+    def test_list_assigned_classes(self, client: TestClient, auth: dict, seeded: dict, engine: Engine) -> None:
+        # 教师任教两个班，另建一个未任教的班级（应被过滤）
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
+        s = factory()
+        grade_id = s.execute(select(Grade.id).where(Grade.school_id == seeded["school_id"])).scalar()
+        klass2 = Class(name="高一(2)班", grade_id=grade_id, subject="chemistry")
+        s.add(klass2)
+        s.flush()
+        unassigned = Class(name="高一(3)班", grade_id=grade_id, subject="chemistry")
+        s.add(unassigned)
+        s.flush()
+        s.add(TeacherClassSubject(teacher_id=seeded["teacher_id"], class_id=seeded["class_id"], subject="chemistry"))
+        s.add(TeacherClassSubject(teacher_id=seeded["teacher_id"], class_id=klass2.id, subject="chemistry"))
+        s.commit()
+        klass2_id = klass2.id
+        s.close()
+
+        resp = client.get("/api/classes", headers=auth)
+        assert resp.status_code == 200
+        items = resp.json()
+        assert {c["id"] for c in items} == {seeded["class_id"], klass2_id}
+        for c in items:
+            assert "id" in c and "name" in c
+
+    def test_other_teacher_no_classes(self, client: TestClient, seeded: dict, engine: Engine) -> None:
+        other_auth = _seed_other_teacher(engine, seeded["school_id"])
+        resp = client.get("/api/classes", headers=other_auth)
+        assert resp.status_code == 200
+        assert resp.json() == []
 
 
 # ---------------------------------------------------------------------------

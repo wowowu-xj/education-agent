@@ -6,7 +6,7 @@ Alembic autogenerate 依赖 Base.metadata 感知所有表，因此必须在此�
 from app.models.account import Account
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin
 from app.models.class_ import Class
-from app.models.exam import Exam
+from app.models.exam import Exam, ExamStatusTransition
 from app.models.grade import Grade
 from app.models.paper import Paper, PaperQuestion
 from app.models.parent import Parent
@@ -41,4 +41,5 @@ __all__ = [
     "Paper",
     "PaperQuestion",
     "Exam",
+    "ExamStatusTransition",
 ]
