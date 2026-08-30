@@ -50,7 +50,7 @@
 
 ### Knowledge Point（知识点）
 化学课程大纲中的知识单元，如"化学平衡常数"、"氧化还原反应"。
-- 关联：Question、Exam Paper
+- 关联：Question、Paper
 
 ### Diagnosis（诊断）
 基于学生答题记录生成的学习障碍分析报告，包含障碍类型分布和迷思概念识别。
@@ -64,17 +64,34 @@
 
 ## 内容实体
 
-### Exam Paper（试卷）
-包含若干题目的考试卷，具有生命周期状态。
-- 属性：title、total_score、duration（分钟）、state
+### Paper（试卷）
+教师组的考试卷（内容实体），含有序题目列表，可发布到一个或多个班级。
+- 属性：title、teacher_id（所属教师）、duration（分钟，可空）；total_score 由题目分值求和派生（不落库）
+- 状态：draft（可编辑）→ locked（已发布到至少一个班，只读）
+- 关联：通过 PaperQuestion 与 Question 形成 N:M（共享引用）；发布时生成一个或多个 Exam
+- _Avoid_: "Exam Paper"（旧称，与 Exam 混淆）
+
+### Exam（考试）
+一份 Paper 发布到某个班级后形成的按班实例，生命周期按班独立。
+- 属性：paper_id（引用 Paper，共享引用）、class_id（绑定班级）、exam_date
+- 状态：见下方 Exam State（两层状态机）
+- 关联：Paper（N:1）、Class（N:1）
 
 ### Question（题目）
-试卷或题库中的单个题目，包含题干、选项、答案、解析。
-- 属性：type、difficulty、knowledge_points、standard_answer
+题库或试卷中的单个题目，包含题干、选项、答案、解析。是唯一的结构化题目实体——AI 生成、手动录入、历史真题最终都归一为 Question。
+- 属性：content、type（9 种题型）、options（JSON，仅选择题）、answer（标准答案）、analysis、knowledge_points（JSON 数组）、difficulty（4 档）、score、teacher_id（可空，创建者）、source_name/region/year（可空，来源元数据）
+- 关联：被 QuestionSetItem 引用（进题库文件夹）、被 PaperQuestion 引用（进试卷），均为 N:M 共享引用
+- _Avoid_: `standard_answer`（旧字段名，现统一为 `answer`）
 
-### Question Set / Question Bank（题库）
-按知识点、难度、题型组织的题目集合，供教师选题组卷。
-- 索引维度：知识点、难度、题型、年份
+### Question Set（题库文件夹）
+题库中教师创建的题目文件夹，扁平结构（文件夹直接装题目，不嵌套）。
+- 属性：name、teacher_id（所属教师）、description、region/year（来源地区/年份，可空）、is_preset（系统预设不可删）
+- 关联：通过 QuestionSetItem 与 Question 形成 N:M（一道题可进多个文件夹，共享引用）
+- _Avoid_: "Question Bank"、"Exam Bank"（模块名）、"ExamSet"
+
+### QuestionSetItem（文件夹-题目关联）
+连接题库文件夹与题目的中间实体（纯关系表，硬删除）。
+- 属性：question_set_id、question_id、sort_order、added_at
 
 ### Weekly Report（周报）
 每周自动生成的学生学情报告，推送给学生和家长。
@@ -235,16 +252,56 @@ LLM 生成 → 化学式归一化 → 方程式安全审核 → 题目质量评�
 违反红线的方程式触发 **HARD BLOCK**：无论如何不能输出给用户，触发重新生成并上报监控告警。
 
 ### Exam State（考试状态）
-考试生命周期的七种状态：
-- **draft**：草稿（教师编辑中）
-- **published**：已发布（学生可见但未开始）
-- **in_progress**：进行中（学生答题中）
-- **grading**：批阅中（教师或AI批阅）
-- **completed**：已完成（批阅结束，成绩已发布）
-- **archived**：已归档（历史记录）
-- **cancelled**：已取消（考试作废）
 
-状态转换规则：`draft → published → in_progress → grading → completed → archived`
+考试生命周期拆为两层：Paper 承载"组卷编辑"，Exam 承载"按班作答流转"。
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    state "Paper（试卷）" as Paper {
+        [*] --> draft : 创建
+        draft --> locked : 发布到 N 个班
+    }
+    state "Exam（按班实例）" as Exam {
+        [*] --> published : 发布
+        published --> in_progress : 学生开始作答
+        in_progress --> grading : 全部交卷/手动结束
+        grading --> completed : finalize 批阅完成
+        completed --> archived : 归档
+        published --> cancelled : 取消
+        in_progress --> cancelled : 取消
+    }
+    Paper --> Exam : locked 时按班生成
+```
+
+- **Paper 两态**：`draft`（可编辑）→ `locked`（已发布，只读）
+- **Exam 六态**：`published` → `in_progress` → `grading` → `completed` → `archived`；`published`/`in_progress` 可转 `cancelled`
+- 本期只接教师侧迁移：发布（→published）、取消（→cancelled）、finalize（→completed）；`in_progress`/`grading` 的自动进入依赖学生作答链路，defer
+
+---
+
+## 真题检索（概要）
+
+> 向量检索核心（ChromaDB 索引 + 语义召回 + 两层检索）已纳入 exam-bank change；联网搜索兜底、RAG 注入、历史真题库数据源（渠道二）仍属后续 change，以下先对齐术语。
+
+### 三层递进搜索（search_exam_bank）
+真题搜索按"由近及远"三级递进，逐步扩大召回：
+1. **第一层 关键词匹配**：结构化过滤（source/year/region/knowledge_point/difficulty）+ 中文分词 + 停用词过滤，仅在 knowledge_points 字段搜索（避免 content/answer 噪音）
+2. **第二层 向量检索补充**：关键词结果不足时，用 ChromaDB 按 similarity ≥ 0.6 召回，提取 exam_id（去 `::kp-n` 后缀）去重补充
+3. **第三层 联网搜索兜底**：关键词命中极少时触发，MiMo 联网搜索 + DeepSeek 二次总结，结果标注"网络补充"
+
+### 向量检索（两层）
+- 第一层关键词匹配：知识点重叠度 + 精确匹配加权 + 难度匹配排序，取 Top-20 候选
+- 第二层 ChromaDB 向量精筛：候选范围 `where id in [...]`（无候选则全量），按 cosine 相似度取 Top-K
+- 降级：ChromaDB 不可用 → 仅关键词匹配
+
+### 索引策略
+- **每个知识点一个向量**：ID 形如 `question_id::kp-n`，使一道题可从任意知识点维度被检索
+- 嵌入文本 = "考点+题型+难度+来源+题目(前500字)+答案" 语义拼接
+- Embedding：dashscope text-embedding-v3（1024 维）；维度不匹配自动清空重建
+
+### RAG 上下文注入
+向量检索命中 ≥3 道相似题时，将题目 content + answer 注入 LLM 出题 prompt；不足 3 道则降级为纯 LLM 生成。
 
 ---
 
@@ -313,4 +370,4 @@ OCR 识别失败或准确率过低时的备用方案。
 
 ---
 
-**最后更新**：2026-08-22
+**最后更新**：2026-08-27

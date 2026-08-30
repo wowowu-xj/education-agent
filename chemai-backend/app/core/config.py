@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     # 留空表示不注册 CORS 中间件（同源部署时的默认状态）。
     CORS_ORIGINS: str = ""
 
+    # 向量检索
+    # ChromaDB 持久化目录（已加入 .gitignore）。
+    CHROMA_DB_PATH: str = "./chroma_db"
+    # dashscope 嵌入服务 API Key（留空则回退到环境变量 / MD5 伪向量降级）。
+    DASHSCOPE_API_KEY: str = ""
+    # dashscope text-embedding-v3 输出维度。
+    EMBEDDING_DIMENSION: int = 1024
+
     @property
     def is_production(self) -> bool:
         """是否生产环境。用于决定是否暴露 API 文档等敏感入口。"""
