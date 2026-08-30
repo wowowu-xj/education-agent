@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.audit import router as audit_router
+from app.api.auth import router as auth_router
 from app.api.classes import router as classes_router
 from app.api.exams import router as exams_router
 from app.api.papers import router as papers_router
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
         return {"status": "ok", "app": settings.APP_NAME}
 
     # 注册业务路由
+    app.include_router(auth_router)
     app.include_router(audit_router)
     app.include_router(classes_router)
     app.include_router(questions_router)
