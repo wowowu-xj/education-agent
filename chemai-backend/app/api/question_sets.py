@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_teacher
+from app.api.questions import QuestionOut
 from app.core.database import get_db
 from app.models import Question, QuestionSet, QuestionSetItem, Teacher
 
@@ -199,6 +200,29 @@ def delete_question_set(
     obj.soft_delete()
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/{question_set_id}/questions",
+    response_model=list[QuestionOut],
+    summary="文件夹内题目列表",
+)
+def list_questions_in_set(
+    question_set_id: int,
+    teacher: Teacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> list[Question]:
+    """列出文件夹内题目（按 sort_order 升序，同序按题目 id 稳定，过滤软删题）。"""
+    _get_owned_set(db, question_set_id, teacher.id)
+    return db.execute(
+        select(Question)
+        .join(QuestionSetItem, QuestionSetItem.question_id == Question.id)
+        .where(
+            QuestionSetItem.question_set_id == question_set_id,
+            Question.deleted_at.is_(None),
+        )
+        .order_by(QuestionSetItem.sort_order, QuestionSetItem.question_id)
+    ).scalars().all()
 
 
 @router.post("/{question_set_id}/questions", status_code=status.HTTP_201_CREATED, summary="文件夹加题")
