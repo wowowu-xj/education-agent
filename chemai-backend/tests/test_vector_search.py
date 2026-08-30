@@ -18,6 +18,7 @@ from app.services.vector_search import (
     VectorSearchService,
     compose_index_text,
     keyword_candidates,
+    keyword_similarity,
     md5_vector,
 )
 
@@ -135,6 +136,13 @@ class TestPureFunctions:
         result = keyword_candidates([q_overlap_only, q_exact], "氧化还原反应")
         assert [q.id for q in result] == [q_exact.id, q_overlap_only.id]
 
+    def test_keyword_similarity_exact_and_overlap(self) -> None:
+        # 降级路径相似度：精确匹配 = 1.0，仅考点重叠 = 0.6（≥ 检索阈值）
+        q_exact = _make_question(1, ["氧化还原反应"], "关于氧化还原反应的详解")
+        q_overlap = _make_question(2, ["氧化还原反应"], "甲题")
+        assert keyword_similarity(q_exact, "氧化还原反应") == 1.0
+        assert keyword_similarity(q_overlap, "氧化还原反应") == 0.6
+
 
 # ---------------------------------------------------------------------------
 # 索引构建
@@ -198,7 +206,7 @@ class TestSearch:
         chroma_service.index_question(q2)
 
         result = chroma_service.search(db, "氧化还原反应", teacher.id, top_k=5)
-        assert [q.id for q in result] == [q1.id]
+        assert [h.question.id for h in result] == [q1.id]
 
     def test_vector_recall_without_keyword_hits(
         self, db: Session, teacher: Teacher, chroma_service: VectorSearchService
@@ -208,7 +216,7 @@ class TestSearch:
         chroma_service.index_question(q1)
 
         result = chroma_service.search(db, "氧化剂", teacher.id, top_k=5)
-        assert [q.id for q in result] == [q1.id]
+        assert [h.question.id for h in result] == [q1.id]
 
     def test_threshold_filters_low_similarity(
         self, db: Session, teacher: Teacher, chroma_service: VectorSearchService
@@ -232,13 +240,13 @@ class TestSearch:
 
         # 不过滤：两道都命中「氧化还原反应」
         result = chroma_service.search(db, "氧化还原反应", teacher.id, top_k=5)
-        assert {q.id for q in result} == {q1.id, q2.id}
+        assert {h.question.id for h in result} == {q1.id, q2.id}
 
         # knowledge_point 过滤到「摩尔计算」→ 仅 q2
         result = chroma_service.search(
             db, "氧化还原反应", teacher.id, top_k=5, knowledge_point="摩尔计算"
         )
-        assert [q.id for q in result] == [q2.id]
+        assert [h.question.id for h in result] == [q2.id]
 
     def test_search_deduplicates_multi_kp_question(
         self, db: Session, teacher: Teacher, chroma_service: VectorSearchService
@@ -251,7 +259,7 @@ class TestSearch:
         chroma_service.index_question(q)
 
         result = chroma_service.search(db, "氧化还原反应", teacher.id, top_k=5)
-        assert [x.id for x in result] == [q.id]
+        assert [x.question.id for x in result] == [q.id]
 
     def test_search_fills_top_k_distinct_after_dedup(
         self, db: Session, teacher: Teacher, tmp_path
@@ -285,10 +293,62 @@ class TestSearch:
         service.index_question(q_b)
 
         result = service.search(db, "氧化还原反应", teacher.id, top_k=2)
-        ids = [x.id for x in result]
+        ids = [x.question.id for x in result]
         assert len(ids) == 2
         assert len(set(ids)) == 2  # 去重后仍是 2 道不同题（而非被 q_big 挤成 1 道）
         assert q_big.id in ids  # 最高相似度的多考点题未被丢弃
+
+    def test_search_returns_similarity_descending(
+        self, db: Session, teacher: Teacher, tmp_path
+    ) -> None:
+        # 三个向量与查询的余弦相似度分别为 1.0 / 0.8 / 0.707，按内容标记「高/中/低」。
+        def graded_embed(texts: list[str], dim: int) -> list[list[float]]:
+            vecs: list[list[float]] = []
+            for t in texts:
+                if "高" in t:
+                    vecs.append([1.0] + [0.0] * (dim - 1))          # sim 1.0
+                elif "中" in t:
+                    vecs.append([0.8, 0.6] + [0.0] * (dim - 2))     # sim 0.8
+                elif "低" in t:
+                    vecs.append([0.7071, 0.7071] + [0.0] * (dim - 2))  # sim ≈0.707
+                else:
+                    vecs.append([1.0] + [0.0] * (dim - 1))          # 查询向量
+            return vecs
+
+        service = VectorSearchService(
+            client=chromadb.PersistentClient(path=str(tmp_path / "chroma")),
+            embed_fn=graded_embed,
+            dim=DIM,
+        )
+        q_high = _persist_question(db, teacher, ["氧化还原反应"], "高相似度题")
+        q_mid = _persist_question(db, teacher, ["氧化还原反应"], "中相似度题")
+        q_low = _persist_question(db, teacher, ["氧化还原反应"], "低相似度题")
+        service.index_question(q_high)
+        service.index_question(q_mid)
+        service.index_question(q_low)
+
+        result = service.search(db, "氧化还原反应", teacher.id, top_k=3)
+        assert [h.question.id for h in result] == [q_high.id, q_mid.id, q_low.id]
+        sims = [h.similarity for h in result]
+        assert all(0 <= s <= 1 for s in sims)
+        assert all(not h.degraded for h in result)
+        assert sims == sorted(sims, reverse=True)  # 降序
+        assert abs(sims[0] - 1.0) < 1e-6
+        assert abs(sims[1] - 0.8) < 1e-6
+        assert abs(sims[2] - 0.7071) < 1e-3
+
+    def test_exclude_question_id(self, db: Session, teacher: Teacher, chroma_service: VectorSearchService) -> None:
+        q1 = _persist_question(db, teacher, ["氧化还原反应"], "下列关于氧化还原反应的说法")
+        q2 = _persist_question(db, teacher, ["氧化还原反应"], "另一道氧化还原反应题目")
+        chroma_service.index_question(q1)
+        chroma_service.index_question(q2)
+
+        result = chroma_service.search(
+            db, "氧化还原反应", teacher.id, top_k=5, exclude_question_id=q1.id
+        )
+        ids = [h.question.id for h in result]
+        assert q1.id not in ids
+        assert q2.id in ids
 
     def test_healthy_no_threshold_does_not_fallback_to_keyword(
         self, db: Session, teacher: Teacher, tmp_path
@@ -329,7 +389,21 @@ class TestDegradation:
         service = VectorSearchService(client=BrokenClient(), embed_fn=fake_embed, dim=DIM)
         q1 = _persist_question(db, teacher, ["氧化还原反应"], "下列关于氧化还原反应的说法")
         result = service.search(db, "氧化还原反应", teacher.id, top_k=5)
-        assert [q.id for q in result] == [q1.id]
+        assert [h.question.id for h in result] == [q1.id]
+
+    def test_keyword_fallback_marks_degraded(self, db: Session, teacher: Teacher) -> None:
+        class BrokenClient:
+            def get_or_create_collection(self, *args: object, **kwargs: object) -> None:
+                raise RuntimeError("chroma down")
+
+        service = VectorSearchService(client=BrokenClient(), embed_fn=fake_embed, dim=DIM)
+        q1 = _persist_question(db, teacher, ["氧化还原反应"], "下列关于氧化还原反应的说法")
+        result = service.search(db, "氧化还原反应", teacher.id, top_k=5)
+        assert len(result) == 1
+        hit = result[0]
+        assert hit.question.id == q1.id
+        assert hit.degraded is True
+        assert 0 <= hit.similarity <= 1
 
     def test_embed_failure_uses_md5_exact_match(self, db: Session, teacher: Teacher, tmp_path) -> None:
         def broken_embed(texts: list[str], dim: int) -> list[list[float]]:
@@ -347,7 +421,8 @@ class TestDegradation:
         # 语义退化为精确匹配：查询与索引文本完全一致时 MD5 向量相同 → 命中
         index_text = compose_index_text(q1, "氧化还原反应")
         result = service.search(db, index_text, teacher.id, top_k=5)
-        assert [q.id for q in result] == [q1.id]
+        assert [h.question.id for h in result] == [q1.id]
+        assert result[0].degraded is True  # MD5 伪向量 → 降级语义
 
     def test_index_failure_does_not_raise(self) -> None:
         class BrokenClient:

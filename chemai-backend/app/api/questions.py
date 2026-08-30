@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -82,6 +82,15 @@ class QuestionOut(BaseModel):
     updated_at: datetime
 
 
+class QuestionPage(BaseModel):
+    """题目列表分页响应（items + 分页元数据）。"""
+
+    items: list[QuestionOut]
+    total: int
+    page: int
+    page_size: int
+
+
 class SearchRequest(BaseModel):
     """语义召回请求体。"""
 
@@ -90,6 +99,54 @@ class SearchRequest(BaseModel):
     type: Optional[QuestionType] = None
     difficulty: Optional[Difficulty] = None
     knowledge_point: Optional[str] = None
+    exclude_question_id: Optional[int] = None
+
+
+class QuestionSearchHit(QuestionOut):
+    """语义召回命中：题目字段平铺 + 相似度 + 降级标志。"""
+
+    similarity: float
+    degraded: bool
+
+
+class QuestionBatchRequest(BaseModel):
+    """批量导入请求体（原始题目对象数组，逐题校验）。"""
+
+    items: list[dict]
+
+
+class QuestionBatchPreviewItem(BaseModel):
+    """批量导入预览的逐题结果。"""
+
+    index: int
+    valid: bool
+    question: Optional[QuestionCreate] = None
+    errors: list[str] = Field(default_factory=list)
+
+
+class QuestionBatchPreviewOut(BaseModel):
+    """批量导入预览响应。"""
+
+    items: list[QuestionBatchPreviewItem]
+    valid_count: int
+    invalid_count: int
+
+
+class QuestionBatchCommitResult(BaseModel):
+    """批量导入确认的逐题结果。"""
+
+    index: int
+    status: str  # created | failed
+    question_id: Optional[int] = None
+    reason: Optional[str] = None
+
+
+class QuestionBatchCommitOut(BaseModel):
+    """批量导入确认响应。"""
+
+    success_count: int
+    failed_count: int
+    results: list[QuestionBatchCommitResult]
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +171,14 @@ def _get_owned_question(db: Session, question_id: int, teacher_id: int) -> Quest
     return question
 
 
+def _format_validation_errors(exc: ValidationError) -> list[str]:
+    """将 Pydantic 校验错误展平为「字段: 原因」的可读字符串列表。"""
+    return [
+        f"{'.'.join(str(p) for p in err.get('loc', ()))}: {err.get('msg', '')}"
+        for err in exc.errors()
+    ]
+
+
 # ---------------------------------------------------------------------------
 # 端点
 # ---------------------------------------------------------------------------
@@ -134,7 +199,83 @@ def create_question(
     return question
 
 
-@router.get("", response_model=list[QuestionOut], summary="题目列表（结构化过滤）")
+@router.post("/batch/preview", response_model=QuestionBatchPreviewOut, summary="批量导入预览")
+def batch_preview(
+    payload: QuestionBatchRequest,
+    teacher: Teacher = Depends(get_current_teacher),
+) -> QuestionBatchPreviewOut:
+    """逐题解析并校验批量导入内容，不落库，返回可导入题数与错误明细。
+
+    `teacher` 仅作鉴权门，预览校验与归属无关。
+    """
+    items: list[QuestionBatchPreviewItem] = []
+    valid_count = 0
+    invalid_count = 0
+    for index, raw in enumerate(payload.items):
+        try:
+            question = QuestionCreate.model_validate(raw)
+        except ValidationError as exc:
+            invalid_count += 1
+            items.append(
+                QuestionBatchPreviewItem(
+                    index=index, valid=False, errors=_format_validation_errors(exc)
+                )
+            )
+        else:
+            valid_count += 1
+            items.append(QuestionBatchPreviewItem(index=index, valid=True, question=question))
+    return QuestionBatchPreviewOut(
+        items=items, valid_count=valid_count, invalid_count=invalid_count
+    )
+
+
+@router.post("/batch/commit", response_model=QuestionBatchCommitOut, summary="批量导入确认")
+def batch_commit(
+    payload: QuestionBatchRequest,
+    teacher: Teacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> QuestionBatchCommitOut:
+    """重校验后逐题写入通过项并建向量索引，返回成功/失败统计与逐题原因。
+
+    逐题独立提交：单题失败捕获后计入「失败」并继续，不整体回滚。
+    """
+    results: list[QuestionBatchCommitResult] = []
+    success_count = 0
+    failed_count = 0
+    for index, raw in enumerate(payload.items):
+        try:
+            question_data = QuestionCreate.model_validate(raw)
+        except ValidationError as exc:
+            failed_count += 1
+            results.append(
+                QuestionBatchCommitResult(
+                    index=index, status="failed", reason=_format_validation_errors(exc)[0]
+                )
+            )
+            continue
+        try:
+            question = Question(teacher_id=teacher.id, **question_data.model_dump())
+            db.add(question)
+            db.commit()
+            db.refresh(question)
+            vector_search.index_question(question)
+        except Exception as exc:  # noqa: BLE001 - 逐题失败不阻断整体
+            db.rollback()
+            failed_count += 1
+            results.append(
+                QuestionBatchCommitResult(index=index, status="failed", reason=str(exc))
+            )
+            continue
+        success_count += 1
+        results.append(
+            QuestionBatchCommitResult(index=index, status="created", question_id=question.id)
+        )
+    return QuestionBatchCommitOut(
+        success_count=success_count, failed_count=failed_count, results=results
+    )
+
+
+@router.get("", response_model=QuestionPage, summary="题目列表（分页 + 结构化过滤）")
 def list_questions(
     type: Optional[QuestionType] = None,
     difficulty: Optional[Difficulty] = None,
@@ -142,14 +283,21 @@ def list_questions(
     source_name: Optional[str] = None,
     region: Optional[str] = None,
     year: Optional[int] = None,
+    page: int = 1,
+    page_size: int = 20,
     teacher: Teacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
-) -> list[Question]:
-    """按题型/难度/来源地区/年份结构化过滤，仅返回本教师题目。
+) -> QuestionPage:
+    """按题型/难度/来源地区/年份结构化过滤 + 分页，仅返回本教师题目。
 
-    knowledge_point 过滤在 Python 侧完成：JSON 数组包含判定跨 SQLite/MySQL
-    方言无统一原生实现，教师个人题库量级下 Python 过滤足够快且行为确定。
+    组合筛选为 AND 语义。knowledge_point 过滤在 Python 侧完成：JSON 数组
+    包含判定跨 SQLite/MySQL 方言无统一原生实现，教师个人题库量级下 Python
+    过滤足够快且行为确定，故分页也在过滤后切片。
     """
+    # 越界参数钳制而非 422：page ≤ 0 视作第 1 页，page_size 上限 100。
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+
     stmt = select(Question).where(
         Question.deleted_at.is_(None), Question.teacher_id == teacher.id
     )
@@ -167,17 +315,25 @@ def list_questions(
     questions = db.execute(stmt.order_by(Question.id)).scalars().all()
     if knowledge_point is not None:
         questions = [q for q in questions if knowledge_point in (q.knowledge_points or [])]
-    return questions
+
+    total = len(questions)
+    start = (page - 1) * page_size
+    return QuestionPage(
+        items=questions[start : start + page_size],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
-@router.post("/search", response_model=list[QuestionOut], summary="语义召回题目")
+@router.post("/search", response_model=list[QuestionSearchHit], summary="语义召回题目")
 def search_questions(
     payload: SearchRequest,
     teacher: Teacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
-) -> list[Question]:
-    """两层检索：关键词粗筛 → 向量精筛，返回相似题目（教师数据隔离）。"""
-    return vector_search.search(
+) -> list[QuestionSearchHit]:
+    """两层检索：关键词粗筛 → 向量精筛，返回相似题目 + 相似度 + 降级标注（教师数据隔离）。"""
+    hits = vector_search.search(
         db,
         payload.query,
         teacher.id,
@@ -185,7 +341,15 @@ def search_questions(
         type=payload.type,
         difficulty=payload.difficulty,
         knowledge_point=payload.knowledge_point,
+        exclude_question_id=payload.exclude_question_id,
     )
+    result: list[QuestionSearchHit] = []
+    for hit in hits:
+        data = QuestionOut.model_validate(hit.question).model_dump()
+        data["similarity"] = hit.similarity
+        data["degraded"] = hit.degraded
+        result.append(QuestionSearchHit(**data))
+    return result
 
 
 @router.get("/{question_id}", response_model=QuestionOut, summary="题目详情")

@@ -311,6 +311,35 @@
                   <div v-if="q.overallStatus === 'blocked'" class="mt-2 text-xs text-block font-medium">
                     ✗ 该题目存在安全审核阻断，不会出现在学生端。
                   </div>
+
+                  <!-- 相似题推荐入口（SIMILAR） -->
+                  <div class="mt-3 pt-3 border-t border-accent/30">
+                    <div class="flex justify-end">
+                      <button @click="toggleSimilar(q)" class="text-xs text-teal font-medium hover:underline">
+                        {{ similarForId === q.id ? '收起相似题' : '查相似题' }}
+                      </button>
+                    </div>
+
+                    <div v-if="similarForId === q.id" class="mt-2">
+                      <div v-if="similarLoading" class="text-xs text-muted py-2">检索中…</div>
+                      <div v-else-if="similarHits.length === 0" class="text-xs text-muted py-2">未找到相似题。</div>
+                      <div v-else class="space-y-2">
+                        <div v-for="(hit, hi) in similarHits" :key="hit.id" class="bg-paper border border-accent/30 rounded-lg p-3">
+                          <div class="flex items-center gap-2 flex-wrap mb-1">
+                            <span class="text-xs font-semibold text-oxford">#{{ hi + 1 }}</span>
+                            <span class="px-2 py-0.5 rounded text-xs font-medium" :class="difficultyBadgeClass(hit.difficulty)">{{ difficultyLabel(hit.difficulty) }}</span>
+                            <span class="px-2 py-0.5 rounded text-xs font-medium bg-bg-warm text-oxford border border-accent/40">{{ typeLabel(hit.type) }}</span>
+                            <span v-if="hit.degraded" class="ml-auto px-2 py-0.5 rounded text-xs font-medium bg-warn-bg text-warn border border-warn/30">精确匹配</span>
+                            <span v-else class="ml-auto text-xs font-semibold text-teal">{{ similarityPercent(hit.similarity) }}</span>
+                          </div>
+                          <p class="text-xs text-ink leading-relaxed">{{ stemSummary(hit.content) }}</p>
+                          <div v-if="!hit.degraded" class="mt-1.5 h-1.5 bg-accent/20 rounded-full overflow-hidden">
+                            <div class="h-full bg-teal rounded-full" :style="{ width: similarityPercent(hit.similarity) }"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -318,19 +347,86 @@
         </section>
 
         <!-- ======================= Tab 2：题库管理 ======================= -->
-        <section v-show="activeTab === 'bank'" class="bg-white border border-accent/40 rounded-lg p-6">
+        <section v-show="activeTab === 'bank'">
           <div class="flex items-center justify-between mb-4">
-            <h2 class="font-serif text-xl font-bold text-oxford">学科题库</h2>
-            <button @click="notImplemented('新建目录')" class="text-muted hover:text-oxford">＋ 新建目录</button>
+            <h2 class="font-serif text-xl font-bold text-oxford">题库管理</h2>
+            <div class="flex items-center gap-2">
+              <button @click="openBatch()" class="btn-feedback bg-teal text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-teal-hover">⇪ 批量导入</button>
+              <button @click="openNewSet()" class="btn-feedback bg-oxford text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-oxford-hover">＋ 新建文件夹</button>
+            </div>
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div v-for="item in bankItems" :key="item.id" class="bg-paper border border-accent/40 rounded-lg p-4 cursor-pointer hover:border-oxford transition-colors">
-              <div class="flex items-center justify-between mb-2">
-                <span class="px-2 py-0.5 rounded text-xs font-semibold bg-bg-warm text-oxford">{{ item.subject }}</span>
-                <span class="text-xs text-muted">ID: {{ item.id }}</span>
+
+          <!-- 未登录 / 无数据空态 -->
+          <div v-if="!hasToken" class="bg-white border border-accent/40 rounded-lg p-10 text-center space-y-2">
+            <div class="text-4xl">🔐</div>
+            <p class="text-muted text-sm">请先登录后管理题库。登录落地后此处自动加载。</p>
+          </div>
+
+          <div v-else class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- 左列：文件夹列表 -->
+            <div class="lg:col-span-4">
+              <div v-if="bankLoading" class="bg-white border border-accent/40 rounded-lg p-6 text-sm text-muted">加载中…</div>
+
+              <div v-else-if="bankSets.length === 0" class="bg-white border border-accent/40 rounded-lg p-8 text-center space-y-2">
+                <div class="text-3xl">📁</div>
+                <p class="text-muted text-sm">还没有题库文件夹</p>
+                <button @click="openNewSet()" class="text-teal text-sm font-medium hover:underline">＋ 新建第一个文件夹</button>
               </div>
-              <h4 class="font-medium text-ink text-sm mb-1">{{ item.title }}</h4>
-              <p class="text-xs text-muted line-clamp-2">{{ item.excerpt }}</p>
+
+              <div v-else class="space-y-2">
+                <div
+                  v-for="s in bankSets" :key="s.id"
+                  @click="selectSet(s.id)"
+                  class="bg-white border rounded-lg p-4 cursor-pointer transition-colors"
+                  :class="selectedSetId === s.id ? 'border-oxford ring-1 ring-oxford/30' : 'border-accent/40 hover:border-oxford'">
+                  <div class="flex items-center justify-between mb-1">
+                    <h4 class="font-medium text-ink text-sm truncate">{{ s.name }}</h4>
+                    <span v-if="s.is_preset" class="px-2 py-0.5 rounded text-xs font-semibold bg-bg-warm text-oxford">预设</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs text-muted">{{ s.question_count }} 道题</span>
+                    <span class="flex items-center gap-2 text-xs">
+                      <button @click.stop="openRenameSet(s)" class="text-muted hover:text-oxford">重命名</button>
+                      <button v-if="!s.is_preset" @click.stop="deleteSet(s)" class="text-block/70 hover:text-block">删除</button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 右列：文件夹题目 -->
+            <div class="lg:col-span-8">
+              <div v-if="!selectedSetId" class="bg-white border border-accent/40 rounded-lg p-10 text-center space-y-2">
+                <div class="text-4xl">🧪</div>
+                <p class="text-muted text-sm">从左侧选择一个文件夹查看其中的题目。</p>
+              </div>
+
+              <div v-else>
+                <div class="flex items-center justify-between mb-4">
+                  <h3 class="font-serif text-lg font-bold text-oxford">{{ selectedSetName }}（{{ setQuestions.length }}）</h3>
+                  <button @click="openPicker" class="btn-feedback bg-teal text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-teal-hover">＋ 加入题目</button>
+                </div>
+
+                <div v-if="setQuestionsLoading" class="bg-white border border-accent/40 rounded-lg p-6 text-sm text-muted">加载中…</div>
+
+                <div v-else-if="setQuestions.length === 0" class="bg-white border border-accent/40 rounded-lg p-10 text-center space-y-2">
+                  <div class="text-4xl">🗂️</div>
+                  <p class="text-muted text-sm">该文件夹暂无题目，从出题工作台生成或点「加入题目」。</p>
+                </div>
+
+                <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div v-for="q in setQuestions" :key="q.id" class="bg-white border border-accent/40 rounded-lg p-4 card-labnote">
+                    <div class="flex items-center gap-2 flex-wrap mb-2">
+                      <span class="px-2 py-0.5 rounded text-xs font-medium" :class="difficultyBadgeClass(q.difficulty)">{{ difficultyLabel(q.difficulty) }}</span>
+                      <span class="px-2 py-0.5 rounded text-xs font-medium bg-bg-warm text-oxford border border-accent/40">{{ typeLabel(q.type) }}</span>
+                    </div>
+                    <p class="text-sm text-ink leading-relaxed line-clamp-3">{{ stemSummary(q.content) }}</p>
+                    <div class="mt-3 pt-2 border-t border-accent/30 flex justify-end">
+                      <button @click="removeQuestionFromSet(q)" class="text-xs text-block/70 hover:text-block">移出</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -362,29 +458,239 @@
         </section>
 
         <!-- ======================= Tab 4：考试列表 ======================= -->
-        <section v-show="activeTab === 'exams'" class="space-y-4">
-          <div class="flex items-center justify-between">
+        <section v-show="activeTab === 'exams'">
+          <div class="flex items-center justify-between mb-4">
             <h2 class="font-serif text-xl font-bold text-oxford">考试列表</h2>
-            <button @click="notImplemented('创建考试')" class="btn-feedback bg-oxford text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-oxford-hover">＋ 创建考试</button>
+            <button @click="openNewPaper()" class="btn-feedback bg-oxford text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-oxford-hover">＋ 创建试卷</button>
           </div>
-          <div class="space-y-3">
-            <div v-for="exam in examList" :key="exam.id" class="bg-white border border-accent/40 border-l-4 rounded-lg p-5 flex items-center justify-between"
-                 :class="exam.statusClass">
-              <div>
-                <h3 class="font-medium text-ink">{{ exam.title }}</h3>
-                <p class="text-sm text-muted">{{ exam.date }}</p>
+
+          <!-- 未登录空态 -->
+          <div v-if="!hasToken" class="bg-white border border-accent/40 rounded-lg p-10 text-center space-y-2">
+            <div class="text-4xl">🔐</div>
+            <p class="text-muted text-sm">请先登录后管理考试。登录落地后此处自动加载。</p>
+          </div>
+
+          <div v-else-if="paperLoading" class="bg-white border border-accent/40 rounded-lg p-6 text-sm text-muted">加载中…</div>
+
+          <div v-else-if="papers.length === 0" class="bg-white border border-accent/40 rounded-lg p-10 text-center space-y-2">
+            <div class="text-4xl">📝</div>
+            <p class="text-muted text-sm">还没有试卷，请先创建一份试卷。</p>
+            <button @click="openNewPaper()" class="text-teal text-sm font-medium hover:underline">＋ 创建第一份试卷</button>
+          </div>
+
+          <div v-else class="space-y-3">
+            <div v-for="p in papers" :key="p.id" class="bg-white border border-accent/40 rounded-lg">
+              <div class="p-5">
+                <div class="flex items-center justify-between gap-4">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap mb-1">
+                      <h3 class="font-medium text-ink">{{ p.title }}</h3>
+                      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold border" :class="statusClass(p.status)">{{ statusLabel(p.status) }}</span>
+                    </div>
+                    <p class="text-sm text-muted">{{ p.question_count }} 道题 · 总分 {{ p.total_score }}</p>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button v-if="p.status === 'draft'" @click="openRenamePaper(p)" class="px-3 py-1.5 border border-accent/40 rounded-lg text-xs text-muted hover:text-oxford">编辑</button>
+                    <button @click="exportPaper(p, 'html')" class="px-3 py-1.5 border border-accent/40 rounded-lg text-xs text-muted hover:text-oxford">预览</button>
+                    <button @click="exportPaper(p, 'docx')" class="px-3 py-1.5 border border-accent/40 rounded-lg text-xs text-muted hover:text-oxford">导出</button>
+                    <button v-if="p.status === 'draft'" @click="openPublish(p)" class="btn-feedback bg-teal text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-teal-hover">发布</button>
+                    <button v-if="p.status === 'draft'" @click="deletePaper(p)" class="px-3 py-1.5 border border-accent/40 rounded-lg text-xs text-block/70 hover:text-block">删除</button>
+                  </div>
+                </div>
               </div>
-              <span class="px-3 py-1 rounded-full text-xs font-semibold" :class="exam.badgeClass">{{ exam.status }}</span>
+
+              <!-- 已发布试卷：展开考试状态（按班） -->
+              <div v-if="p.status === 'locked'" class="border-t border-accent/30 bg-paper/50 rounded-b-lg px-5 py-3">
+                <button @click="toggleExpand(p.id)" class="text-xs text-teal font-medium hover:underline">
+                  {{ expandedPaperId === p.id ? '收起' : '展开' }}已发布班级（{{ (examGroups[p.id] || []).length }}）
+                </button>
+                <div v-if="expandedPaperId === p.id" class="mt-3 space-y-2">
+                  <div v-if="(examGroups[p.id] || []).length === 0" class="text-xs text-muted">暂无关联考试。</div>
+                  <div v-for="e in (examGroups[p.id] || [])" :key="e.id" class="flex items-center justify-between bg-white border border-accent/30 rounded p-3">
+                    <div class="flex items-center gap-3">
+                      <span class="text-sm text-ink">{{ className(e.class_id) }}</span>
+                      <span class="px-2 py-0.5 rounded-full text-xs font-semibold border" :class="statusClass(e.status)">{{ statusLabel(e.status) }}</span>
+                      <span v-if="e.exam_date" class="text-xs text-muted">{{ formatDate(e.exam_date) }}</span>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                      <button v-if="e.status === 'published'" @click="transitionExam(e, 'start')" class="px-2.5 py-1 rounded bg-oxford text-white text-xs font-semibold hover:bg-oxford-hover">开考</button>
+                      <button v-if="e.status === 'in_progress'" @click="transitionExam(e, 'collect')" class="px-2.5 py-1 rounded bg-oxford text-white text-xs font-semibold hover:bg-oxford-hover">收卷</button>
+                      <button v-if="e.status === 'grading'" @click="transitionExam(e, 'finalize')" class="px-2.5 py-1 rounded bg-teal text-white text-xs font-semibold hover:bg-teal-hover">阅卷完成</button>
+                      <button v-if="e.status === 'completed'" @click="transitionExam(e, 'archive')" class="px-2.5 py-1 rounded bg-oxford text-white text-xs font-semibold hover:bg-oxford-hover">归档</button>
+                      <button v-if="e.status === 'published' || e.status === 'in_progress'" @click="cancelExam(e)" class="px-2.5 py-1 rounded border border-accent/40 text-xs text-block/70 hover:text-block">取消</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
+
+        <!-- ======================= 全局提示 toast ======================= -->
+        <div v-if="flash.show" class="fixed top-20 right-6 z-50 max-w-sm px-4 py-3 rounded-lg shadow-lg border text-sm font-medium transition-all"
+             :class="flash.type === 'warn' ? 'bg-block-bg text-block border-block/40' : (flash.type === 'success' ? 'bg-pass-bg text-pass border-pass/40' : 'bg-white text-ink border-accent/40')">
+          {{ flash.text }}
+        </div>
+
+        <!-- ======================= 弹窗：新建/重命名文件夹 ======================= -->
+        <div v-if="showNewSet || renamingSet" class="fixed inset-0 z-40 flex items-center justify-center">
+          <div class="absolute inset-0 bg-oxford/40" @click="closeFolderModal"></div>
+          <div class="relative bg-white rounded-lg border border-accent/40 p-6 w-full max-w-sm shadow-xl">
+            <h3 class="font-serif text-lg font-bold text-oxford mb-4">{{ renamingSet ? '重命名文件夹' : '新建文件夹' }}</h3>
+            <input v-model="folderNameInput" type="text" @keyup.enter="confirmFolder" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford" placeholder="文件夹名称">
+            <div class="flex justify-end gap-2 mt-4">
+              <button @click="closeFolderModal" class="px-4 py-2 border border-accent/40 rounded-lg text-sm text-muted hover:text-ink">取消</button>
+              <button @click="confirmFolder" :disabled="!folderNameInput.trim()" class="btn-feedback bg-oxford text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-oxford-hover disabled:opacity-50">确定</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================= 弹窗：新建/编辑试卷 ======================= -->
+        <div v-if="showNewPaper || renamingPaper" class="fixed inset-0 z-40 flex items-center justify-center">
+          <div class="absolute inset-0 bg-oxford/40" @click="closePaperModal"></div>
+          <div class="relative bg-white rounded-lg border border-accent/40 p-6 w-full max-w-sm shadow-xl">
+            <h3 class="font-serif text-lg font-bold text-oxford mb-4">{{ renamingPaper ? '编辑试卷' : '新建试卷' }}</h3>
+            <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">标题</label>
+            <input v-model="paperTitleInput" type="text" @keyup.enter="confirmPaper" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford mb-3" placeholder="试卷标题">
+            <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">时长（分钟，可选）</label>
+            <input v-model.number="paperDurationInput" type="number" min="1" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford" placeholder="如 60">
+            <div class="flex justify-end gap-2 mt-4">
+              <button @click="closePaperModal" class="px-4 py-2 border border-accent/40 rounded-lg text-sm text-muted hover:text-ink">取消</button>
+              <button @click="confirmPaper" :disabled="!paperTitleInput.trim()" class="btn-feedback bg-oxford text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-oxford-hover disabled:opacity-50">确定</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================= 弹窗：发布试卷（班级多选） ======================= -->
+        <div v-if="publishTarget" class="fixed inset-0 z-40 flex items-center justify-center">
+          <div class="absolute inset-0 bg-oxford/40" @click="publishTarget = null"></div>
+          <div class="relative bg-white rounded-lg border border-accent/40 p-6 w-full max-w-md shadow-xl">
+            <h3 class="font-serif text-lg font-bold text-oxford mb-4">发布试卷：{{ publishTarget.title }}</h3>
+            <label class="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">选择班级（可多选）</label>
+            <div v-if="publishClassList.length === 0" class="text-sm text-muted py-3">暂无可发布的任教班级。</div>
+            <div v-else class="space-y-2 max-h-48 overflow-y-auto">
+              <label v-for="c in publishClassList" :key="c.id" class="flex items-center gap-2 cursor-pointer px-3 py-2 border border-accent/30 rounded-lg hover:border-oxford">
+                <input type="checkbox" :value="c.id" v-model="publishClassIds" class="w-4 h-4 rounded border-accent text-oxford focus:ring-oxford">
+                <span class="text-sm text-ink">{{ c.name }}</span>
+              </label>
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+              <button @click="publishTarget = null" class="px-4 py-2 border border-accent/40 rounded-lg text-sm text-muted hover:text-ink">取消</button>
+              <button @click="confirmPublish" :disabled="publishClassIds.length === 0" class="btn-feedback bg-teal text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-teal-hover disabled:opacity-50">发布</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================= 弹窗：加入题目（选择器） ======================= -->
+        <div v-if="pickerOpen" class="fixed inset-0 z-40 flex items-center justify-center">
+          <div class="absolute inset-0 bg-oxford/40" @click="closePicker"></div>
+          <div class="relative bg-white rounded-lg border border-accent/40 p-6 w-full max-w-2xl shadow-xl max-h-[85vh] flex flex-col">
+            <h3 class="font-serif text-lg font-bold text-oxford mb-3">加入题目到「{{ selectedSetName }}」</h3>
+            <div class="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <select v-model="pickerType" @change="applyPickerFilter" class="px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none cursor-pointer">
+                <option value="">全部题型</option>
+                <option v-for="t in allTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
+              </select>
+              <select v-model="pickerDifficulty" @change="applyPickerFilter" class="px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none cursor-pointer">
+                <option value="">全部难度</option>
+                <option v-for="d in allDifficulties" :key="d.value" :value="d.value">{{ d.label }}</option>
+              </select>
+              <input v-model="pickerKnowledgePoint" @keyup.enter="applyPickerFilter" type="text" class="px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford" placeholder="知识点（回车筛选）">
+            </div>
+            <div class="mb-3 flex items-center justify-between text-xs">
+              <span class="text-muted">共 {{ pickerTotal }} 道题</span>
+              <button @click="resetPickerFilter" class="text-teal hover:underline">重置筛选</button>
+            </div>
+            <div v-if="pickerLoading" class="text-sm text-muted py-4">加载中…</div>
+            <div v-else-if="pickerResults.length === 0" class="text-sm text-muted py-4">没有符合条件的题目。</div>
+            <div v-else class="space-y-2 overflow-y-auto">
+              <label v-for="q in pickerResults" :key="q.id" class="flex items-start gap-3 p-3 border border-accent/30 rounded-lg cursor-pointer hover:border-oxford">
+                <input type="checkbox" :value="q.id" v-model="pickerSelected" class="mt-0.5 w-4 h-4 rounded border-accent text-oxford focus:ring-oxford">
+                <div class="min-w-0">
+                  <p class="text-sm text-ink line-clamp-2">{{ stemSummary(q.content) }}</p>
+                  <span class="text-xs text-muted">{{ typeLabel(q.type) }} · {{ difficultyLabel(q.difficulty) }}</span>
+                </div>
+              </label>
+            </div>
+            <div class="flex items-center justify-between mt-3 text-sm">
+              <button @click="goPickerPage(-1)" :disabled="pickerPage <= 1" class="px-3 py-1.5 border border-accent/40 rounded-lg disabled:opacity-40">上一页</button>
+              <span class="text-xs text-muted">第 {{ pickerPage }} / {{ pickerMaxPage }} 页</span>
+              <button @click="goPickerPage(1)" :disabled="pickerPage >= pickerMaxPage" class="px-3 py-1.5 border border-accent/40 rounded-lg disabled:opacity-40">下一页</button>
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+              <button @click="closePicker" class="px-4 py-2 border border-accent/40 rounded-lg text-sm text-muted hover:text-ink">取消</button>
+              <button @click="confirmPicker" :disabled="pickerSelected.length === 0" class="btn-feedback bg-oxford text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-oxford-hover disabled:opacity-50">加入（{{ pickerSelected.length }}）</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================= 弹窗：批量导入（三步流程） ======================= -->
+        <div v-if="batchOpen" class="fixed inset-0 z-40 flex items-center justify-center">
+          <div class="absolute inset-0 bg-oxford/40" @click="closeBatch"></div>
+          <div class="relative bg-white rounded-lg border border-accent/40 p-6 w-full max-w-2xl shadow-xl max-h-[85vh] flex flex-col">
+            <h3 class="font-serif text-lg font-bold text-oxford mb-3">批量导入题目</h3>
+
+            <!-- 步骤 1/2：粘贴 + 预览 -->
+            <div v-if="batchStep !== 'result'">
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-muted">粘贴 JSON 题目数组（content / type / difficulty / answer 必填，字段与手动录入一致）。</p>
+                <label class="text-xs text-teal cursor-pointer hover:underline shrink-0 ml-3">
+                  上传 JSON 文件
+                  <input type="file" accept=".json,.txt,application/json" class="hidden" @change="onBatchFile">
+                </label>
+              </div>
+              <textarea v-model="batchText" rows="8" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none focus:border-oxford font-mono" placeholder='[{"content": "下列反应中…", "type": "single_choice", "options": ["A","B","C","D"], "answer": "C", "difficulty": "medium"}]'></textarea>
+
+              <div v-if="batchPreview" class="mt-3 border border-accent/30 rounded-lg p-3 max-h-48 overflow-y-auto">
+                <div class="text-sm mb-1">
+                  可导入 <span class="font-semibold text-pass">{{ batchPreview.valid_count }}</span> 道，
+                  未通过 <span class="font-semibold text-block">{{ batchPreview.invalid_count }}</span> 道
+                </div>
+                <div v-for="it in batchPreview.items" :key="it.index" class="text-xs leading-relaxed">
+                  <span v-if="it.valid" class="text-pass">✓ 第 {{ it.index + 1 }} 题：通过</span>
+                  <span v-else class="text-block">✗ 第 {{ it.index + 1 }} 题：{{ it.errors.join('；') }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 步骤 3：结果统计 -->
+            <div v-else class="space-y-2">
+              <div class="text-sm">
+                导入完成：成功 <span class="font-semibold text-pass">{{ batchResult.success_count }}</span> 道，
+                失败 <span class="font-semibold text-block">{{ batchResult.failed_count }}</span> 道
+              </div>
+              <label class="flex items-center gap-2 text-xs text-muted cursor-pointer">
+                <input type="checkbox" v-model="batchShowFailedOnly" class="w-4 h-4 rounded border-accent text-oxford focus:ring-oxford">
+                仅看失败
+              </label>
+              <div class="border border-accent/30 rounded-lg p-3 max-h-56 overflow-y-auto space-y-1">
+                <div v-for="r in batchVisibleResults" :key="r.index" class="text-xs leading-relaxed" :class="r.status === 'created' ? 'text-pass' : 'text-block'">
+                  <span v-if="r.status === 'created'">✓ 第 {{ r.index + 1 }} 题：已创建（#{{ r.question_id }}）</span>
+                  <span v-else>✗ 第 {{ r.index + 1 }} 题：{{ r.reason }}</span>
+                </div>
+                <div v-if="batchVisibleResults.length === 0" class="text-xs text-muted">（无）</div>
+              </div>
+            </div>
+
+            <div class="flex justify-end gap-2 mt-4">
+              <button @click="closeBatch" class="px-4 py-2 border border-accent/40 rounded-lg text-sm text-muted hover:text-ink">关闭</button>
+              <button v-if="batchStep !== 'result'" @click="runBatchPreview" :disabled="batchParsing || !batchText.trim()" class="btn-feedback bg-oxford text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-oxford-hover disabled:opacity-50">
+                {{ batchPreview ? '重新预览' : '解析预览' }}
+              </button>
+              <button v-if="batchStep === 'preview' && batchPreview && batchPreview.valid_count > 0" @click="commitBatch" :disabled="batchCommitting" class="btn-feedback bg-teal text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-teal-hover disabled:opacity-50">
+                确认导入 {{ batchPreview.valid_count }} 道
+              </button>
+              <button v-if="batchStep === 'result'" @click="openBatch" class="btn-feedback bg-oxford text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-oxford-hover">再导一批</button>
+            </div>
+          </div>
+        </div>
 
       </div>
     </main>
   </div>
 
   <script>
-    const { createApp, ref, reactive } = Vue;
+    const { createApp, ref, reactive, computed, watch, onMounted } = Vue;
 
     // ---------- 词汇表（与 question-vocabulary spec 对齐） ----------
     const AI_TYPES = [
@@ -421,6 +727,18 @@
       { key: 'product', label: '产物' },
       { key: 'structure', label: '结构' },
     ];
+
+    // 状态标签映射（D6）：Paper 两态 + Exam 六态 → 中文 + Academic Catalyst 语义配色
+    const STATUS_MAP = {
+      draft:       { label: '草稿',   cls: 'bg-paper text-muted border-accent/40' },
+      locked:      { label: '已发布', cls: 'bg-teal/10 text-teal border-teal/30' },
+      published:   { label: '已发布', cls: 'bg-teal/10 text-teal border-teal/30' },
+      in_progress: { label: '进行中', cls: 'bg-teal/10 text-teal border-teal/30' },
+      grading:     { label: '批阅中', cls: 'bg-warn-bg text-warn border-warn/30' },
+      completed:   { label: '已完成', cls: 'bg-pass-bg text-pass border-pass/30' },
+      archived:    { label: '已归档', cls: 'bg-paper text-muted border-accent/40' },
+      cancelled:   { label: '已取消', cls: 'bg-block-bg text-block border-block/30' },
+    };
 
     // ---------- Mock 生成结果（演示三态徽章） ----------
     const MOCK_QUESTIONS = [
@@ -465,25 +783,10 @@
       },
     ];
 
-    const BANK_ITEMS = [
-      { id: 'C-2938', subject: '化学', title: '关于化学反应速率和限度的描述', excerpt: '在恒温恒容条件下，下列各项能说明反应已达到平衡状态的是…' },
-      { id: 'C-5521', subject: '化学', title: '氧化还原反应配平', excerpt: '配平下列化学方程式：$\\ce{KMnO4 + HCl -> KCl + MnCl2 + Cl2 + H2O}$' },
-      { id: 'P-1102', subject: '物理', title: '牛顿第二定律的应用', excerpt: '一个质量为 m 的物体在水平恒力 F 的作用下由静止开始运动…' },
-      { id: 'B-4451', subject: '生物', title: '细胞呼吸的过程分析', excerpt: '有氧呼吸的三个阶段中，产生 ATP 最多的阶段是…' },
-      { id: 'P-8829', subject: '物理', title: '动能定理综合应用', excerpt: '一小球从高处落下，进入泥潭后停止运动…' },
-      { id: 'B-1023', subject: '生物', title: '遗传规律计算题', excerpt: '已知某植物的花色受两对独立遗传的等位基因控制…' },
-    ];
-
     const HISTORY_EXAMS = [
       { id: 'h1', region: '北京', year: '2024', title: '2024 年普通高等学校招生全国统一考试（北京卷）化学', count: 28 },
       { id: 'h2', region: '全国卷', year: '2023', title: '2023 年普通高等学校招生全国统一考试（全国卷）化学', count: 32 },
       { id: 'h3', region: '上海', year: '2022', title: '2022 年普通高等学校招生全国统一考试（上海卷）化学', count: 24 },
-    ];
-
-    const EXAM_LIST = [
-      { id: 'e1', title: '高一化学期中考试', date: '2024-11-15', status: '进行中', statusClass: 'border-l-teal', badgeClass: 'bg-bg-warm text-teal' },
-      { id: 'e2', title: '高二物理月考', date: '2024-10-20', status: '已结束', statusClass: 'border-l-muted', badgeClass: 'bg-paper text-muted' },
-      { id: 'e3', title: '高三生物模拟测试', date: '2024-12-01', status: '草稿', statusClass: 'border-l-accent', badgeClass: 'bg-warn-bg text-warn' },
     ];
 
     createApp({
@@ -520,9 +823,7 @@
         const aiDifficulties = AI_DIFFICULTIES;
         const allDifficulties = ALL_DIFFICULTIES;
         const dimOrder = DIM_ORDER;
-        const bankItems = BANK_ITEMS;
         const historyExams = HISTORY_EXAMS;
-        const examList = EXAM_LIST;
 
         function toggleType(v) {
           const i = selectedTypes.value.indexOf(v);
@@ -641,14 +942,500 @@
             .join('');
         }
 
+        // ---------- 标签工具（Tab 2/4 复用，D6 落表） ----------
+        function statusLabel(s) { return (STATUS_MAP[s] || { label: s }).label; }
+        function statusClass(s) { return (STATUS_MAP[s] || STATUS_MAP.draft).cls; }
+        function typeLabel(t) { return (ALL_TYPES.find(x => x.value === t) || {}).label || t; }
+        function difficultyLabel(d) { return (ALL_DIFFICULTIES.find(x => x.value === d) || {}).label || d; }
+        function formatDate(iso) {
+          if (!iso) return '';
+          const d = new Date(iso);
+          return isNaN(d.getTime()) ? iso : `${d.getMonth() + 1}月${d.getDate()}日`;
+        }
+        // 题干摘要：剥离 LaTeX 记号，取前 60 字
+        function stemSummary(content) {
+          if (typeof content !== 'string') return '';
+          const plain = content
+            .replace(/\$\$[^$]*\$\$|\$[^$]*\$/g, '')
+            .replace(/\\[a-zA-Z]+\{?/g, '')
+            .replace(/[{}]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          return plain.length > 60 ? plain.slice(0, 60) + '…' : plain;
+        }
+
+        // ---------- 认证与请求 ----------
+        const TOKEN_KEY = 'chemai_access_token';
+        const hasToken = ref(!!localStorage.getItem(TOKEN_KEY));
+        function authHeaders() {
+          const t = localStorage.getItem(TOKEN_KEY) || '';
+          return t ? { Authorization: 'Bearer ' + t } : {};
+        }
+        async function apiFetch(url, opts = {}) {
+          const options = Object.assign({}, opts);
+          options.headers = Object.assign({}, opts.headers || {}, authHeaders());
+          if (opts.body && typeof opts.body === 'object') {
+            options.headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(opts.body);
+          }
+          const resp = await fetch(url, options);
+          if (resp.status === 204) return null;
+          let data = null;
+          try { data = await resp.json(); } catch (e) { data = null; }
+          if (!resp.ok) {
+            const msg = (data && (data.message || data.detail)) || `请求失败（${resp.status}）`;
+            const err = new Error(msg);
+            err.status = resp.status;
+            throw err;
+          }
+          return data;
+        }
+
+        // ---------- 全局提示 ----------
+        const flash = reactive({ show: false, type: 'info', text: '' });
+        function notify(text, type = 'info') {
+          flash.text = text; flash.type = type; flash.show = true;
+          clearTimeout(notify._t);
+          notify._t = setTimeout(() => { flash.show = false; }, 3500);
+        }
+
+        // ---------- Tab 2 题库管理 ----------
+        const bankSets = ref([]);
+        const bankLoading = ref(false);
+        const selectedSetId = ref(null);
+        const setQuestions = ref([]);
+        const setQuestionsLoading = ref(false);
+        const selectedSet = computed(() => bankSets.value.find(s => s.id === selectedSetId.value) || null);
+        const selectedSetName = computed(() => selectedSet.value ? selectedSet.value.name : '');
+
+        const showNewSet = ref(false);
+        const renamingSet = ref(null);
+        const folderNameInput = ref('');
+
+        const pickerOpen = ref(false);
+        const pickerLoading = ref(false);
+        const pickerType = ref('');
+        const pickerDifficulty = ref('');
+        const pickerKnowledgePoint = ref('');
+        const pickerPage = ref(1);
+        const pickerPageSize = 20;
+        const pickerTotal = ref(0);
+        const pickerResults = ref([]);
+        const pickerSelected = ref([]);
+        const pickerMaxPage = computed(() => Math.max(1, Math.ceil(pickerTotal.value / pickerPageSize)));
+
+        async function loadBankSets() {
+          if (!hasToken.value) return;
+          bankLoading.value = true;
+          try { bankSets.value = await apiFetch('/api/question-sets'); }
+          catch (e) { notify(e.message, 'warn'); }
+          finally { bankLoading.value = false; }
+        }
+        async function selectSet(id) {
+          selectedSetId.value = id;
+          setQuestions.value = [];
+          if (id == null) return;
+          setQuestionsLoading.value = true;
+          try { setQuestions.value = await apiFetch(`/api/question-sets/${id}/questions`); }
+          catch (e) { notify(e.message, 'warn'); }
+          finally { setQuestionsLoading.value = false; }
+        }
+        function openNewSet() { folderNameInput.value = ''; renamingSet.value = null; showNewSet.value = true; }
+        function openRenameSet(s) { folderNameInput.value = s.name; renamingSet.value = s; showNewSet.value = false; }
+        function closeFolderModal() { showNewSet.value = false; renamingSet.value = null; folderNameInput.value = ''; }
+        async function confirmFolder() {
+          const name = folderNameInput.value.trim();
+          if (!name) return;
+          try {
+            if (renamingSet.value) {
+              await apiFetch(`/api/question-sets/${renamingSet.value.id}`, { method: 'PUT', body: { name } });
+              notify('已重命名', 'success');
+            } else {
+              await apiFetch('/api/question-sets', { method: 'POST', body: { name } });
+              notify('文件夹已创建', 'success');
+            }
+            closeFolderModal();
+            await loadBankSets();
+          } catch (e) { notify(e.message, 'warn'); }
+        }
+        async function deleteSet(s) {
+          if (!confirm(`确认删除文件夹「${s.name}」？其中的题目不会被删除。`)) return;
+          try {
+            await apiFetch(`/api/question-sets/${s.id}`, { method: 'DELETE' });
+            if (selectedSetId.value === s.id) { selectedSetId.value = null; setQuestions.value = []; }
+            notify('文件夹已删除', 'success');
+            await loadBankSets();
+          } catch (e) { notify(e.message, 'warn'); }
+        }
+        function openPicker() {
+          if (!selectedSetId.value) { notify('请先选择一个文件夹', 'warn'); return; }
+          pickerSelected.value = [];
+          pickerType.value = '';
+          pickerDifficulty.value = '';
+          pickerKnowledgePoint.value = '';
+          pickerPage.value = 1;
+          pickerOpen.value = true;
+          loadPickerQuestions();
+        }
+        function closePicker() { pickerOpen.value = false; pickerResults.value = []; pickerTotal.value = 0; pickerSelected.value = []; }
+        async function loadPickerQuestions() {
+          pickerLoading.value = true;
+          try {
+            const params = new URLSearchParams({ page: String(pickerPage.value), page_size: String(pickerPageSize) });
+            if (pickerType.value) params.set('type', pickerType.value);
+            if (pickerDifficulty.value) params.set('difficulty', pickerDifficulty.value);
+            if (pickerKnowledgePoint.value) params.set('knowledge_point', pickerKnowledgePoint.value);
+            const data = await apiFetch(`/api/questions?${params.toString()}`);
+            pickerResults.value = data.items;
+            pickerTotal.value = data.total;
+          }
+          catch (e) { notify(e.message, 'warn'); }
+          finally { pickerLoading.value = false; }
+        }
+        function applyPickerFilter() { pickerPage.value = 1; loadPickerQuestions(); }
+        function resetPickerFilter() {
+          pickerType.value = '';
+          pickerDifficulty.value = '';
+          pickerKnowledgePoint.value = '';
+          pickerPage.value = 1;
+          loadPickerQuestions();
+        }
+        function goPickerPage(delta) {
+          const next = pickerPage.value + delta;
+          if (next < 1 || next > pickerMaxPage.value) return;
+          pickerPage.value = next;
+          loadPickerQuestions();
+        }
+        async function confirmPicker() {
+          const sid = selectedSetId.value;
+          let added = 0;
+          try {
+            for (const qid of pickerSelected.value) {
+              try {
+                await apiFetch(`/api/question-sets/${sid}/questions`, { method: 'POST', body: { question_id: qid } });
+                added += 1;
+              } catch (e) {
+                if (e.status === 409) notify(`题目 #${qid} 已在文件夹中`, 'warn');
+                else throw e;
+              }
+            }
+            if (added > 0) notify(`已加入 ${added} 道题`, 'success');
+            closePicker();
+            await selectSet(sid);
+            await loadBankSets();
+          } catch (e) { notify(e.message, 'warn'); }
+        }
+        async function removeQuestionFromSet(q) {
+          if (!confirm('将该题移出文件夹？（题目本身不会被删除）')) return;
+          try {
+            await apiFetch(`/api/question-sets/${selectedSetId.value}/questions/${q.id}`, { method: 'DELETE' });
+            setQuestions.value = setQuestions.value.filter(x => x.id !== q.id);
+            await loadBankSets();
+          } catch (e) { notify(e.message, 'warn'); }
+        }
+
+        // ---------- Tab 2 批量导入（预览 → 确认 → 结果统计） ----------
+        const batchOpen = ref(false);
+        const batchText = ref('');
+        const batchStep = ref('input');   // input | preview | result
+        const batchParsing = ref(false);
+        const batchCommitting = ref(false);
+        const batchPreview = ref(null);   // { items, valid_count, invalid_count }
+        const batchResult = ref(null);    // { success_count, failed_count, results }
+        const batchShowFailedOnly = ref(false);
+
+        const batchVisibleResults = computed(() => {
+          if (!batchResult.value) return [];
+          const rs = batchResult.value.results || [];
+          return batchShowFailedOnly.value ? rs.filter(r => r.status === 'failed') : rs;
+        });
+
+        function openBatch() {
+          batchText.value = '';
+          batchStep.value = 'input';
+          batchParsing.value = false;
+          batchCommitting.value = false;
+          batchPreview.value = null;
+          batchResult.value = null;
+          batchShowFailedOnly.value = false;
+          batchOpen.value = true;
+        }
+        function closeBatch() { batchOpen.value = false; }
+
+        function parseBatchText() {
+          let parsed;
+          try {
+            parsed = JSON.parse(batchText.value);
+          } catch (e) {
+            throw new Error('解析失败：请输入合法的 JSON 数组');
+          }
+          if (!Array.isArray(parsed)) throw new Error('请输入 JSON 数组（以 [ 开头）');
+          if (parsed.length === 0) throw new Error('数组为空，请至少提供一道题');
+          return parsed;
+        }
+
+        function onBatchFile(e) {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => { batchText.value = String(reader.result || ''); };
+          reader.readAsText(file);
+          e.target.value = '';
+        }
+
+        async function runBatchPreview() {
+          let items;
+          try { items = parseBatchText(); }
+          catch (e) { notify(e.message, 'warn'); return; }
+          batchParsing.value = true;
+          try {
+            batchPreview.value = await apiFetch('/api/questions/batch/preview', { method: 'POST', body: { items } });
+            batchStep.value = 'preview';
+            if (batchPreview.value.valid_count === 0) notify('没有可通过校验的题目', 'warn');
+          } catch (e) { notify(e.message, 'warn'); }
+          finally { batchParsing.value = false; }
+        }
+
+        async function commitBatch() {
+          let items;
+          try { items = parseBatchText(); }
+          catch (e) { notify(e.message, 'warn'); return; }
+          batchCommitting.value = true;
+          try {
+            batchResult.value = await apiFetch('/api/questions/batch/commit', { method: 'POST', body: { items } });
+            batchStep.value = 'result';
+            const r = batchResult.value;
+            if (r.failed_count === 0) notify(`已成功导入 ${r.success_count} 道题`, 'success');
+            else notify(`导入完成：成功 ${r.success_count}，失败 ${r.failed_count}`, 'warn');
+          } catch (e) { notify(e.message, 'warn'); }
+          finally { batchCommitting.value = false; }
+        }
+
+        // ---------- Tab 4 考试列表（Paper 视角） ----------
+        const papers = ref([]);
+        const paperLoading = ref(false);
+        const exams = ref([]);
+        const classesMap = ref({});
+        const expandedPaperId = ref(null);
+
+        const showNewPaper = ref(false);
+        const renamingPaper = ref(null);
+        const paperTitleInput = ref('');
+        const paperDurationInput = ref(null);
+
+        const publishTarget = ref(null);
+        const publishClassList = ref([]);
+        const publishClassIds = ref([]);
+
+        const examGroups = computed(() => {
+          const g = {};
+          exams.value.forEach(e => { (g[e.paper_id] || (g[e.paper_id] = [])).push(e); });
+          return g;
+        });
+        function className(id) { return classesMap.value[id] || `班级 #${id}`; }
+
+        async function loadClasses() {
+          try {
+            const list = await apiFetch('/api/classes');
+            const m = {};
+            list.forEach(c => { m[c.id] = c.name; });
+            classesMap.value = m;
+            publishClassList.value = list;
+          } catch (e) { /* 选班/解析班名失败时降级，不阻塞列表 */ }
+        }
+        async function loadPapers() {
+          if (!hasToken.value) return;
+          paperLoading.value = true;
+          try { papers.value = await apiFetch('/api/papers'); }
+          catch (e) { notify(e.message, 'warn'); }
+          finally { paperLoading.value = false; }
+        }
+        async function loadExams() {
+          try { exams.value = await apiFetch('/api/exams'); }
+          catch (e) { /* 展开已发布试卷时再提示 */ }
+        }
+
+        function openNewPaper() { paperTitleInput.value = ''; paperDurationInput.value = null; renamingPaper.value = null; showNewPaper.value = true; }
+        function openRenamePaper(p) { paperTitleInput.value = p.title; paperDurationInput.value = p.duration; renamingPaper.value = p; showNewPaper.value = false; }
+        function closePaperModal() { showNewPaper.value = false; renamingPaper.value = null; }
+        async function confirmPaper() {
+          const title = paperTitleInput.value.trim();
+          if (!title) return;
+          const body = { title };
+          if (paperDurationInput.value) body.duration = paperDurationInput.value;
+          try {
+            if (renamingPaper.value) {
+              await apiFetch(`/api/papers/${renamingPaper.value.id}`, { method: 'PUT', body });
+              notify('试卷已更新', 'success');
+            } else {
+              await apiFetch('/api/papers', { method: 'POST', body });
+              notify('试卷已创建', 'success');
+            }
+            closePaperModal();
+            await loadPapers();
+          } catch (e) { notify(e.message, 'warn'); }
+        }
+        async function deletePaper(p) {
+          if (!confirm(`确认删除试卷「${p.title}」？`)) return;
+          try {
+            await apiFetch(`/api/papers/${p.id}`, { method: 'DELETE' });
+            notify('试卷已删除', 'success');
+            await loadPapers();
+          } catch (e) {
+            if (e.status === 409) notify('该试卷已发布为考试，不可删除', 'warn');
+            else notify(e.message, 'warn');
+          }
+        }
+        function openPublish(p) {
+          if (p.question_count === 0) {
+            notify('试卷至少需要 1 道题才能发布', 'warn');
+            return;
+          }
+          publishTarget.value = p;
+          publishClassIds.value = [];
+          loadClasses();
+        }
+        async function confirmPublish() {
+          const p = publishTarget.value;
+          try {
+            await apiFetch(`/api/papers/${p.id}/publish`, { method: 'POST', body: { class_ids: publishClassIds.value } });
+            notify('试卷已发布', 'success');
+            publishTarget.value = null;
+            await loadPapers();
+            await loadExams();
+          } catch (e) { notify(e.message, 'warn'); }
+        }
+        async function exportPaper(p, format) {
+          try {
+            const resp = await fetch(`/api/papers/${p.id}/export?format=${format}`, { headers: authHeaders() });
+            if (!resp.ok) {
+              let msg = `导出失败（${resp.status}）`;
+              try { const d = await resp.json(); msg = d.message || msg; } catch (e) {}
+              notify(msg, 'warn');
+              return;
+            }
+            const blob = await resp.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            if (format === 'html') {
+              window.open(objectUrl, '_blank');
+            } else {
+              const a = document.createElement('a');
+              a.href = objectUrl;
+              a.download = `paper_${p.id}.docx`;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(objectUrl);
+            }
+          } catch (e) { notify(e.message, 'warn'); }
+        }
+        function toggleExpand(pid) { expandedPaperId.value = expandedPaperId.value === pid ? null : pid; }
+        async function cancelExam(e) {
+          if (!confirm('确认取消该考试？')) return;
+          try {
+            await apiFetch(`/api/exams/${e.id}/cancel`, { method: 'POST' });
+            notify('考试已取消', 'success');
+            await loadExams();
+          } catch (err) { notify(err.message, 'warn'); }
+        }
+        async function transitionExam(e, action) {
+          const labels = {
+            start: { confirm: '确认开考该考试？', ok: '考试已开考' },
+            collect: { confirm: '确认收卷进入阅卷？', ok: '已收卷进入阅卷' },
+            finalize: { confirm: '确认阅卷完成？', ok: '阅卷完成' },
+            archive: { confirm: '确认归档该考试？', ok: '考试已归档' },
+          };
+          const l = labels[action];
+          if (!l) return;
+          if (!confirm(l.confirm)) return;
+          try {
+            await apiFetch(`/api/exams/${e.id}/${action}`, { method: 'POST' });
+            notify(l.ok, 'success');
+            await loadExams();
+          } catch (err) { notify(err.message, 'warn'); }
+        }
+
+        // ---------- Tab 1 相似题推荐 ----------
+        const similarForId = ref(null);      // 当前展开相似题的题目 id（null=收起）
+        const similarLoading = ref(false);
+        const similarHits = ref([]);         // [{...题目字段, similarity, degraded}]
+
+        // 相似度（0~1）→ 百分比文案；非数字时返回空串。
+        function similarityPercent(s) {
+          if (typeof s !== 'number') return '';
+          return Math.round(s * 100) + '%';
+        }
+
+        function toggleSimilar(q) {
+          if (similarForId.value === q.id) {
+            similarForId.value = null;
+            similarHits.value = [];
+            return;
+          }
+          similarForId.value = q.id;
+          fetchSimilar(q);
+        }
+
+        async function fetchSimilar(q) {
+          similarLoading.value = true;
+          similarHits.value = [];
+          const body = { query: stemSummary(q.stem) || q.title || '', top_k: 5 };
+          // 排除自身：当前题为真实题库题（数字 id）时透传 exclude_question_id。
+          if (typeof q.id === 'number') body.exclude_question_id = q.id;
+          try {
+            similarHits.value = await apiFetch('/api/questions/search', { method: 'POST', body });
+            if (similarHits.value.length === 0) notify('未找到相似题', 'info');
+          } catch (e) {
+            notify(e.message, 'warn');
+          } finally {
+            similarLoading.value = false;
+          }
+        }
+
+        // ---------- 初始化 ----------
+        onMounted(() => {
+          if (hasToken.value) {
+            loadBankSets();
+            loadPapers();
+            loadClasses();
+            loadExams();
+          }
+        });
+        watch(activeTab, (v) => {
+          if (!hasToken.value) return;
+          if (v === 'bank') loadBankSets();
+          if (v === 'exams') { loadPapers(); loadClasses(); loadExams(); }
+        });
+
         return {
           tabs, subModes, activeTab, subMode,
           aiTypes, allTypes, aiDifficulties, allDifficulties, dimOrder,
           selectedTypes, difficulty, count, knowledgePoint,
           generateVariants, variantBaseId, questions, generating,
-          manualForm, bankItems, historyExams, examList,
+          manualForm, historyExams,
           toggleType, isTypeSelected, generate, submitManual,
           auditIcon, auditBadgeClass, difficultyBadgeClass, renderStem, notImplemented,
+          similarForId, similarLoading, similarHits, similarityPercent, toggleSimilar, fetchSimilar,
+          // 通用
+          hasToken, flash, notify,
+          statusLabel, statusClass, typeLabel, difficultyLabel, stemSummary, formatDate,
+          // Tab 2 题库管理
+          bankSets, bankLoading, selectedSetId, selectedSetName, setQuestions, setQuestionsLoading,
+          showNewSet, renamingSet, folderNameInput,
+          pickerOpen, pickerLoading, pickerType, pickerDifficulty, pickerKnowledgePoint,
+          pickerPage, pickerPageSize, pickerTotal, pickerMaxPage, pickerResults, pickerSelected,
+          applyPickerFilter, resetPickerFilter, goPickerPage,
+          loadBankSets, selectSet, openNewSet, openRenameSet, closeFolderModal, confirmFolder, deleteSet,
+          openPicker, closePicker, confirmPicker, removeQuestionFromSet,
+          batchOpen, batchText, batchStep, batchParsing, batchCommitting,
+          batchPreview, batchResult, batchShowFailedOnly, batchVisibleResults,
+          openBatch, closeBatch, onBatchFile, runBatchPreview, commitBatch,
+          // Tab 4 考试列表
+          papers, paperLoading, exams, classesMap, expandedPaperId, examGroups, className,
+          showNewPaper, renamingPaper, paperTitleInput, paperDurationInput,
+          publishTarget, publishClassList, publishClassIds,
+          openNewPaper, openRenamePaper, closePaperModal, confirmPaper, deletePaper,
+          openPublish, confirmPublish, exportPaper, toggleExpand, cancelExam, transitionExam,
         };
       },
     }).mount('#app');

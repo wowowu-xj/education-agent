@@ -12,6 +12,8 @@ ID 形如 ``<question_id>::kp-n``。
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import hashlib
 import re
 from typing import Callable, Optional
@@ -106,6 +108,32 @@ def keyword_candidates(
     return [q for _, q in scored[:top_n]]
 
 
+def keyword_similarity(question: Question, query: str) -> float:
+    """降级路径（无真实 embedding）下的相似度。
+
+    精确匹配（题干完整包含 query）= 1.0；否则按考点重叠给恒定 0.6
+    （≥ SIMILARITY_THRESHOLD），使降级结果仍具「命中」语义。无语义距离，
+    前端据 ``degraded`` 标志弱化展示。
+    """
+    if query and query in (question.content or ""):
+        return 1.0
+    tokens = _tokenize(query)
+    overlap = sum(
+        1 for kp in (question.knowledge_points or [])
+        if any(t and t in kp for t in tokens)
+    )
+    return 0.6 if overlap > 0 else 0.0
+
+
+@dataclass(frozen=True)
+class SearchHit:
+    """一次检索命中项：题目 + 相似度（0~1）+ 降级标志。"""
+
+    question: Question
+    similarity: float
+    degraded: bool
+
+
 class VectorSearchService:
     """ChromaDB 索引 + 两层检索。"""
 
@@ -121,6 +149,8 @@ class VectorSearchService:
         self._embed_fn = embed_fn or _dashscope_embed
         self.dim = dim or settings.EMBEDDING_DIMENSION
         self._collection: object | None = None
+        # 最近一次 embed() 是否走真实嵌入（False=MD5 伪向量降级，None=尚未调用）。
+        self._real_embeddings_ok: bool | None = None
 
     @property
     def client(self) -> object:
@@ -161,10 +191,16 @@ class VectorSearchService:
         return coll
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """嵌入一组文本，embedding 失败时降级为 MD5 伪向量。"""
+        """嵌入一组文本，embedding 失败时降级为 MD5 伪向量。
+
+        同时记录真实嵌入是否成功（供检索层决定是否回退关键词）。
+        """
         try:
-            return self._embed_fn(texts, self.dim)
+            vecs = self._embed_fn(texts, self.dim)
+            self._real_embeddings_ok = True
+            return vecs
         except Exception:
+            self._real_embeddings_ok = False
             return [md5_vector(t, self.dim) for t in texts]
 
     def index_question(self, question: Question) -> None:
@@ -205,8 +241,13 @@ class VectorSearchService:
         type: QuestionType | None = None,
         difficulty: Difficulty | None = None,
         knowledge_point: str | None = None,
-    ) -> list[Question]:
-        """两层检索：关键词粗筛 → 向量精筛；降级保证可用。"""
+        exclude_question_id: int | None = None,
+    ) -> list[SearchHit]:
+        """两层检索：关键词粗筛 → 向量精筛；降级保证可用。
+
+        返回命中项序列，每项含 ``question`` + ``similarity``（0~1，降序）+
+        ``degraded``（降级语义标志）。``exclude_question_id`` 从候选池剔除指定题目。
+        """
         stmt = select(Question).where(
             Question.deleted_at.is_(None),
             Question.teacher_id == teacher_id,
@@ -219,20 +260,46 @@ class VectorSearchService:
         # 知识点结构化过滤：JSON 数组包含判定在 Python 侧完成（跨方言无统一原生实现）。
         if knowledge_point is not None:
             pool = [q for q in pool if knowledge_point in (q.knowledge_points or [])]
+        # 排除自身：结果阶段过滤（Decision 2，不改索引）——从候选池剔除即可覆盖
+        # 关键词/向量/降级全部下游路径。
+        if exclude_question_id is not None:
+            pool = [q for q in pool if q.id != exclude_question_id]
 
         kw = keyword_candidates(pool, query, top_n=KEYWORD_TOP_N)
         kw_ids = [q.id for q in kw]
 
         # ChromaDB 不可用 → 纯关键词降级（Decision 8）。
         if not self.available:
-            return kw[:top_k]
+            return self._keyword_hits(kw, query, top_k)
 
-        # ChromaDB 可用但无 ≥0.6 命中：返回空，不降级为关键词（阈值是硬约束）。
         # 候选向量总数：一题多考点会产多向量，需请求足够条数，去重后仍凑满 top_k 道不同题。
         total_vecs = sum(len(q.knowledge_points or []) for q in kw)
         hits = self._vector_search(query, kw_ids, top_k, total_vecs)
-        by_id = {q.id: q for q in pool}
-        return [by_id[qid] for qid in hits if qid in by_id]
+        if hits:
+            by_id = {q.id: q for q in pool}
+            # MD5 伪向量命中（语义退化为精确匹配）也标注 degraded。
+            degraded = self._real_embeddings_ok is False
+            result: list[SearchHit] = []
+            for qid, sim in hits:
+                q = by_id.get(qid)
+                if q is not None:
+                    result.append(SearchHit(question=q, similarity=sim, degraded=degraded))
+            return result
+        # 向量层空命中：真实嵌入时阈值是硬约束（返回空，不降级为关键词）；
+        # 但若嵌入已退化为 MD5 伪向量（无语义，向量层必然空命中），则回退关键词，
+        # 落实 Decision 8「嵌入不可用 → 检索仍可用」。
+        if self._real_embeddings_ok is False:
+            return self._keyword_hits(kw, query, top_k)
+        return []
+
+    def _keyword_hits(self, kw: list[Question], query: str, top_k: int) -> list[SearchHit]:
+        """关键词降级结果：相似度用 ``keyword_similarity``，标注 degraded，按相似度降序。"""
+        hits = [
+            SearchHit(question=q, similarity=keyword_similarity(q, query), degraded=True)
+            for q in kw[:top_k]
+        ]
+        hits.sort(key=lambda h: (-h.similarity, h.question.id))
+        return hits
 
     def _vector_search(
         self,
@@ -240,8 +307,8 @@ class VectorSearchService:
         candidate_ids: list[int],
         top_k: int,
         total_vecs: int = 0,
-    ) -> list[int]:
-        """第二层：向量精筛，返回去重后的命中题目 id（最多 top_k 个，similarity >= 阈值）。"""
+    ) -> list[tuple[int, float]]:
+        """第二层：向量精筛，返回去重后的 (题目 id, 相似度)，最多 top_k 个，similarity >= 阈值。"""
         if not self.available:
             return []
         try:
@@ -258,7 +325,7 @@ class VectorSearchService:
             )
             metadatas = (res.get("metadatas") or [[]])[0] or []
             distances = (res.get("distances") or [[]])[0] or []
-            result: list[int] = []
+            result: list[tuple[int, float]] = []
             seen: set[int] = set()
             for i, meta in enumerate(metadatas):
                 dist = distances[i] if i < len(distances) else 1.0
@@ -268,7 +335,7 @@ class VectorSearchService:
                     # 一题多考点 → 多个向量可能同时命中，按题目去重（保留首个即最高相似度）。
                     if qid not in seen:
                         seen.add(qid)
-                        result.append(qid)
+                        result.append((qid, sim))
                         if len(result) >= top_k:
                             break
             return result
