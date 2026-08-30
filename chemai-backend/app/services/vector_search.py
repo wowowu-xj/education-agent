@@ -93,14 +93,16 @@ def keyword_candidates(
 ) -> list[Question]:
     """第一层：关键词粗筛。
 
-    打分 = 知识点重叠数（查询 token 命中题目考点）+ 精确匹配加权（题干含完整 query）。
+    打分 = 知识点重叠数（查询 token 与考点双向子串包含）+ 精确匹配加权（题干含完整 query）。
+    双向匹配：既支持 query 本身是考点词（"化学平衡" in 考点），也支持题干里
+    自然出现考点词（考点 "化学平衡" in token "达到化学平衡状态"）。
     同分按难度 easy→competition 排序，再按 id 稳定。
     """
     tokens = _tokenize(query)
     scored: list[tuple[float, Question]] = []
     for q in questions:
         kps = q.knowledge_points or []
-        overlap = sum(1 for kp in kps if any(t and t in kp for t in tokens))
+        overlap = sum(1 for kp in kps if any(t and (t in kp or kp in t) for t in tokens))
         exact = 1.0 if (query and query in (q.content or "")) else 0.0
         if overlap or exact:
             scored.append((overlap + exact, q))
@@ -120,7 +122,7 @@ def keyword_similarity(question: Question, query: str) -> float:
     tokens = _tokenize(query)
     overlap = sum(
         1 for kp in (question.knowledge_points or [])
-        if any(t and t in kp for t in tokens)
+        if any(t and (t in kp or kp in t) for t in tokens)
     )
     return 0.6 if overlap > 0 else 0.0
 
