@@ -11,13 +11,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_teacher
 from app.core.database import get_db
 from app.core.enums import Difficulty, PaperStatus, QuestionType
-from app.models import Paper, PaperQuestion, Question, Teacher
+from app.models import Paper, PaperQuestion, Question, QuestionSetItem, Teacher
 from app.services.vector_search import vector_search
 
 router = APIRouter(tags=["题库"], prefix="/api/questions")
@@ -283,12 +283,19 @@ def list_questions(
     source_name: Optional[str] = None,
     region: Optional[str] = None,
     year: Optional[int] = None,
+    exclude_question_set_id: Optional[int] = None,
+    exclude_paper_id: Optional[int] = None,
+    question_set_id: Optional[int] = None,
     page: int = 1,
     page_size: int = 20,
     teacher: Teacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
 ) -> QuestionPage:
     """按题型/难度/来源地区/年份结构化过滤 + 分页，仅返回本教师题目。
+
+    可选 exclude_question_set_id / exclude_paper_id 用于「加入题目 / 组卷」选择器：
+    排除已在该文件夹/试卷内的题目（NOT EXISTS），跨文件夹/试卷互斥、不互相影响。
+    可选 question_set_id 用于限定选题范围为某文件夹内的题目。
 
     组合筛选为 AND 语义。knowledge_point 过滤在 Python 侧完成：JSON 数组
     包含判定跨 SQLite/MySQL 方言无统一原生实现，教师个人题库量级下 Python
@@ -311,6 +318,31 @@ def list_questions(
         stmt = stmt.where(Question.region == region)
     if year is not None:
         stmt = stmt.where(Question.year == year)
+    if exclude_question_set_id is not None:
+        # 加题选择器：排除已在该文件夹内的题目，避免用户重复勾选。
+        # NOT EXISTS 只作用于本教师题目（外层已限 teacher_id），跨文件夹不互斥。
+        stmt = stmt.where(
+            ~exists().where(
+                QuestionSetItem.question_set_id == exclude_question_set_id,
+                QuestionSetItem.question_id == Question.id,
+            )
+        )
+    if exclude_paper_id is not None:
+        # 组卷选择器：排除已在该试卷内的题目，避免重复加题。
+        stmt = stmt.where(
+            ~exists().where(
+                PaperQuestion.paper_id == exclude_paper_id,
+                PaperQuestion.question_id == Question.id,
+            )
+        )
+    if question_set_id is not None:
+        # 文件夹过滤：仅保留该文件夹内的题目（可选选题范围）。
+        stmt = stmt.where(
+            exists().where(
+                QuestionSetItem.question_set_id == question_set_id,
+                QuestionSetItem.question_id == Question.id,
+            )
+        )
 
     questions = db.execute(stmt.order_by(Question.id)).scalars().all()
     if knowledge_point is not None:

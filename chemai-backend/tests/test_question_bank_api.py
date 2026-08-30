@@ -304,6 +304,74 @@ class TestQuestionCrud:
         assert miss["total"] == 0
         assert miss["items"] == []
 
+    def test_list_questions_exclude_question_set(self, client: TestClient, auth: dict) -> None:
+        q1 = _create_question(client, auth)  # 默认题干「氧化还原」
+        q2 = _create_question(client, auth, content="第二题", type="true_false")
+        set_a = client.post("/api/question-sets", json={"name": "专题A"}, headers=auth).json()
+        set_b = client.post("/api/question-sets", json={"name": "专题B"}, headers=auth).json()
+
+        # Q1 加入专题A
+        resp = client.post(
+            f"/api/question-sets/{set_a['id']}/questions",
+            json={"question_id": q1["id"]},
+            headers=auth,
+        )
+        assert resp.status_code == 201
+
+        # 排除专题A：总数 2→1，只剩 Q2
+        excluded_a = client.get(
+            f"/api/questions?exclude_question_set_id={set_a['id']}", headers=auth
+        ).json()
+        assert excluded_a["total"] == 1
+        assert [i["id"] for i in excluded_a["items"]] == [q2["id"]]
+
+        # 排除空专题B：跨文件夹互斥，Q1 仍可见
+        excluded_b = client.get(
+            f"/api/questions?exclude_question_set_id={set_b['id']}", headers=auth
+        ).json()
+        assert excluded_b["total"] == 2
+        assert {i["id"] for i in excluded_b["items"]} == {q1["id"], q2["id"]}
+
+        # 分页正确性：排除后 total 与切片同源，page_size=1 不漂移
+        page = client.get(
+            f"/api/questions?exclude_question_set_id={set_a['id']}&page=1&page_size=1",
+            headers=auth,
+        ).json()
+        assert page["total"] == 1
+        assert len(page["items"]) == 1
+        assert page["items"][0]["id"] == q2["id"]
+
+    def test_list_questions_exclude_paper_and_filter_set(self, client: TestClient, auth: dict) -> None:
+        q1 = _create_question(client, auth)  # 默认题干「氧化还原」
+        q2 = _create_question(client, auth, content="第二题", type="true_false")
+        set_obj = client.post("/api/question-sets", json={"name": "专题A"}, headers=auth).json()
+        paper = _create_paper(client, auth)
+
+        # Q1 加入专题A，Q1 加入试卷
+        client.post(
+            f"/api/question-sets/{set_obj['id']}/questions",
+            json={"question_id": q1["id"]},
+            headers=auth,
+        )
+        _add_question_to_paper(client, auth, paper["id"], q1["id"])
+
+        # 排除试卷：Q1 不在，只剩 Q2
+        excluded = client.get(f"/api/questions?exclude_paper_id={paper['id']}", headers=auth).json()
+        assert excluded["total"] == 1
+        assert [i["id"] for i in excluded["items"]] == [q2["id"]]
+
+        # 文件夹过滤：仅专题A 内的题（Q1）
+        filtered = client.get(f"/api/questions?question_set_id={set_obj['id']}", headers=auth).json()
+        assert filtered["total"] == 1
+        assert filtered["items"][0]["id"] == q1["id"]
+
+        # 组合：专题A 内且不在试卷 = 空
+        combined = client.get(
+            f"/api/questions?question_set_id={set_obj['id']}&exclude_paper_id={paper['id']}",
+            headers=auth,
+        ).json()
+        assert combined["total"] == 0
+
     def test_get_update_delete_question(self, client: TestClient, auth: dict) -> None:
         data = _create_question(client, auth)
         qid = data["id"]

@@ -490,6 +490,7 @@
                     <p class="text-sm text-muted">{{ p.question_count }} 道题 · 总分 {{ p.total_score }}</p>
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
+                    <button v-if="p.status === 'draft'" @click="openPaperPicker(p)" class="btn-feedback bg-oxford text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-oxford-hover">组卷</button>
                     <button v-if="p.status === 'draft'" @click="openRenamePaper(p)" class="px-3 py-1.5 border border-accent/40 rounded-lg text-xs text-muted hover:text-oxford">编辑</button>
                     <button @click="exportPaper(p, 'html')" class="px-3 py-1.5 border border-accent/40 rounded-lg text-xs text-muted hover:text-oxford">预览</button>
                     <button @click="exportPaper(p, 'docx')" class="px-3 py-1.5 border border-accent/40 rounded-lg text-xs text-muted hover:text-oxford">导出</button>
@@ -585,7 +586,14 @@
         <div v-if="pickerOpen" class="fixed inset-0 z-40 flex items-center justify-center">
           <div class="absolute inset-0 bg-oxford/40" @click="closePicker"></div>
           <div class="relative bg-white rounded-lg border border-accent/40 p-6 w-full max-w-2xl shadow-xl max-h-[85vh] flex flex-col">
-            <h3 class="font-serif text-lg font-bold text-oxford mb-3">加入题目到「{{ selectedSetName }}」</h3>
+            <h3 class="font-serif text-lg font-bold text-oxford mb-3">{{ pickerTitle }}</h3>
+            <div v-if="pickerMode === 'paper'" class="mb-3">
+              <label class="block text-xs text-muted mb-1">选题范围</label>
+              <select v-model.number="pickerFolderFilter" @change="applyPickerFilter" class="w-full px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none cursor-pointer">
+                <option :value="0">全部题库</option>
+                <option v-for="s in bankSets" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+            </div>
             <div class="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
               <select v-model="pickerType" @change="applyPickerFilter" class="px-3 py-2 bg-paper border border-accent/50 rounded-lg text-sm outline-none cursor-pointer">
                 <option value="">全部题型</option>
@@ -1022,6 +1030,15 @@
         const pickerTotal = ref(0);
         const pickerResults = ref([]);
         const pickerSelected = ref([]);
+        const pickerMode = ref('set');   // 'set' 加题到文件夹 | 'paper' 组卷
+        const pickerTargetId = ref(null);
+        const pickerTargetName = ref('');
+        const pickerFolderFilter = ref(0);  // 0 = 全部题库，仅 paper 模式使用
+        const pickerTitle = computed(() =>
+          pickerMode.value === 'set'
+            ? `加入题目到「${pickerTargetName.value}」`
+            : `组卷：${pickerTargetName.value}`
+        );
         const pickerMaxPage = computed(() => Math.max(1, Math.ceil(pickerTotal.value / pickerPageSize)));
 
         async function loadBankSets() {
@@ -1069,12 +1086,30 @@
         }
         function openPicker() {
           if (!selectedSetId.value) { notify('请先选择一个文件夹', 'warn'); return; }
+          pickerMode.value = 'set';
+          pickerTargetId.value = selectedSetId.value;
+          pickerTargetName.value = selectedSetName.value;
+          pickerFolderFilter.value = 0;
           pickerSelected.value = [];
           pickerType.value = '';
           pickerDifficulty.value = '';
           pickerKnowledgePoint.value = '';
           pickerPage.value = 1;
           pickerOpen.value = true;
+          loadPickerQuestions();
+        }
+        function openPaperPicker(p) {
+          pickerMode.value = 'paper';
+          pickerTargetId.value = p.id;
+          pickerTargetName.value = p.title;
+          pickerFolderFilter.value = 0;
+          pickerSelected.value = [];
+          pickerType.value = '';
+          pickerDifficulty.value = '';
+          pickerKnowledgePoint.value = '';
+          pickerPage.value = 1;
+          pickerOpen.value = true;
+          if (bankSets.value.length === 0) loadBankSets();
           loadPickerQuestions();
         }
         function closePicker() { pickerOpen.value = false; pickerResults.value = []; pickerTotal.value = 0; pickerSelected.value = []; }
@@ -1085,6 +1120,14 @@
             if (pickerType.value) params.set('type', pickerType.value);
             if (pickerDifficulty.value) params.set('difficulty', pickerDifficulty.value);
             if (pickerKnowledgePoint.value) params.set('knowledge_point', pickerKnowledgePoint.value);
+            if (pickerMode.value === 'set' && pickerTargetId.value) {
+              params.set('exclude_question_set_id', pickerTargetId.value);
+            } else if (pickerMode.value === 'paper' && pickerTargetId.value) {
+              params.set('exclude_paper_id', pickerTargetId.value);
+            }
+            if (pickerMode.value === 'paper' && pickerFolderFilter.value) {
+              params.set('question_set_id', pickerFolderFilter.value);
+            }
             const data = await apiFetch(`/api/questions?${params.toString()}`);
             pickerResults.value = data.items;
             pickerTotal.value = data.total;
@@ -1097,6 +1140,7 @@
           pickerType.value = '';
           pickerDifficulty.value = '';
           pickerKnowledgePoint.value = '';
+          pickerFolderFilter.value = 0;
           pickerPage.value = 1;
           loadPickerQuestions();
         }
@@ -1107,22 +1151,30 @@
           loadPickerQuestions();
         }
         async function confirmPicker() {
-          const sid = selectedSetId.value;
+          const targetId = pickerTargetId.value;
+          const mode = pickerMode.value;
           let added = 0;
           try {
             for (const qid of pickerSelected.value) {
               try {
-                await apiFetch(`/api/question-sets/${sid}/questions`, { method: 'POST', body: { question_id: qid } });
+                const endpoint = mode === 'set'
+                  ? `/api/question-sets/${targetId}/questions`
+                  : `/api/papers/${targetId}/questions`;
+                await apiFetch(endpoint, { method: 'POST', body: { question_id: qid } });
                 added += 1;
               } catch (e) {
-                if (e.status === 409) notify(`题目 #${qid} 已在文件夹中`, 'warn');
+                if (e.status === 409) notify(`题目 #${qid} 已在${mode === 'set' ? '文件夹' : '试卷'}中`, 'warn');
                 else throw e;
               }
             }
             if (added > 0) notify(`已加入 ${added} 道题`, 'success');
             closePicker();
-            await selectSet(sid);
-            await loadBankSets();
+            if (mode === 'set') {
+              await selectSet(targetId);
+              await loadBankSets();
+            } else {
+              await loadPapers();
+            }
           } catch (e) { notify(e.message, 'warn'); }
         }
         async function removeQuestionFromSet(q) {
@@ -1424,9 +1476,10 @@
           showNewSet, renamingSet, folderNameInput,
           pickerOpen, pickerLoading, pickerType, pickerDifficulty, pickerKnowledgePoint,
           pickerPage, pickerPageSize, pickerTotal, pickerMaxPage, pickerResults, pickerSelected,
+          pickerMode, pickerFolderFilter, pickerTitle,
           applyPickerFilter, resetPickerFilter, goPickerPage,
           loadBankSets, selectSet, openNewSet, openRenameSet, closeFolderModal, confirmFolder, deleteSet,
-          openPicker, closePicker, confirmPicker, removeQuestionFromSet,
+          openPicker, openPaperPicker, closePicker, confirmPicker, removeQuestionFromSet,
           batchOpen, batchText, batchStep, batchParsing, batchCommitting,
           batchPreview, batchResult, batchShowFailedOnly, batchVisibleResults,
           openBatch, closeBatch, onBatchFile, runBatchPreview, commitBatch,
