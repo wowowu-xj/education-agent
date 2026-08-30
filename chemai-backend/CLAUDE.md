@@ -9,7 +9,7 @@
 - **出题工作台**：支持教师自主命题、AI辅助生成题目、OCR导入试卷
 - **题目质量评估**：科学性、难度匹配、知识点覆盖、区分度四维度质量检测
 - **障碍诊断引擎**：识别学生学习障碍类型（概念理解/审题/表述）与迷思概念类别（化学平衡/氧化还原/摩尔计算/有机化学/化学用语/物构知识）
-- **题库管理与考试生命周期**：从草稿→发布→进行中→批阅→完成→归档的完整流程
+- **题库管理与考试生命周期**：题库 CRUD → 组卷（Paper）→ 发布多班（Exam）→ 作答批阅 → 完成归档，Paper/Exam 两层状态机
 - **学生练习与错题本**：自适应练习推荐与个性化复习
 - **家长端**：周报推送与学情跟踪
 
@@ -159,14 +159,10 @@ git push origin main           # 推送远程
 - 诊断结果必须同时包含两个维度
 
 ### 考试生命周期
-- 考试状态转换必须严格遵循流程：
-  ```
-  draft → published → in_progress → grading → completed
-                                           ↓
-                                      archived
-                                           ↓
-                                      cancelled
-  ```
+- 考试生命周期拆两层：Paper（试卷，组卷编辑）+ Exam（考试，按班作答流转）
+- **Paper 两态**：`draft`（可编辑）→ `locked`（发布后锁定，只读）
+- **Exam 六态**：`published → in_progress → grading → completed → archived`，其中 `published`/`in_progress` 可转 `cancelled`
+- 本期只接教师侧迁移：发布（→published）、取消（→cancelled）、finalize（→completed）；`in_progress`/`grading` 的自动进入依赖学生作答链路，defer
 - 状态转换必须记录操作人和时间戳
 
 ### OCR与任务轮询
@@ -186,4 +182,4 @@ git push origin main           # 推送远程
 
 ---
 
-**最后更新**：2026-08-02
+**最后更新**：2026-08-27

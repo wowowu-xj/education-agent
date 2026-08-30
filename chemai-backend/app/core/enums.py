@@ -53,3 +53,40 @@ STUDENT_ROLE = "student"
 ACCOUNT_ROLE_VALUES: tuple[str, ...] = tuple(role.value for role in TeacherRole) + (
     STUDENT_ROLE,
 )
+
+
+class QuestionType(str, Enum):
+    """题目类型（九种题型）"""
+    SINGLE_CHOICE = "single_choice"      # 单项选择题
+    MULTI_CHOICE = "multi_choice"        # 多项选择题
+    TRUE_FALSE = "true_false"            # 判断题
+    FILL_BLANK = "fill_blank"            # 填空题
+    SHORT_ANSWER = "short_answer"        # 简答题
+    ESSAY = "essay"                      # 论述题
+    CALCULATION = "calculation"          # 计算题
+    EXPERIMENT = "experiment"            # 实验题
+    INFERENCE = "inference"              # 推断题
+
+
+class Difficulty(str, Enum):
+    """题目难度（四档）"""
+    EASY = "easy"                  # 简单
+    MEDIUM = "medium"              # 中等
+    HARD = "hard"                  # 困难
+    COMPETITION = "competition"    # 竞赛
+
+
+class PaperStatus(str, Enum):
+    """试卷状态（两层状态机第一层）"""
+    DRAFT = "draft"        # 草稿（可编辑）
+    LOCKED = "locked"      # 已发布（只读）
+
+
+class ExamStatus(str, Enum):
+    """考试状态（两层状态机第二层，按班实例）"""
+    PUBLISHED = "published"      # 已发布
+    IN_PROGRESS = "in_progress"  # 作答中
+    GRADING = "grading"          # 批阅中
+    COMPLETED = "completed"      # 已完成
+    ARCHIVED = "archived"        # 已归档
+    CANCELLED = "cancelled"      # 已取消
