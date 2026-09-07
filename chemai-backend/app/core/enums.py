@@ -90,3 +90,31 @@ class ExamStatus(str, Enum):
     COMPLETED = "completed"      # 已完成
     ARCHIVED = "archived"        # 已归档
     CANCELLED = "cancelled"      # 已取消
+
+
+class BarrierType(str, Enum):
+    """障碍类型（回答「怎么错」）——三分类。
+
+    与 :class:`MisconceptionCategory`（回答「错在哪」）正交，诊断结果必须同时包含两维。
+    """
+    CONCEPT = "concept"          # 概念理解型
+    READING = "reading"          # 审题障碍型
+    EXPRESSION = "expression"    # 表述障碍型
+
+
+# 障碍类型 → 中文描述（供学习计划生成时映射，见 diagnosis-learning-plan spec）。
+BARRIER_TYPE_DISPLAY: dict[BarrierType, str] = {
+    BarrierType.CONCEPT: "概念理解型-基础概念和原理掌握不扎实",
+    BarrierType.READING: "审题障碍型-读题时容易忽略关键条件或掉入陷阱选项",
+    BarrierType.EXPRESSION: "表述障碍型-化学用语书写不规范或答题逻辑不清晰",
+}
+
+
+class MisconceptionCategory(str, Enum):
+    """迷思概念类别（回答「错在哪」）——六分类。"""
+    CHEMICAL_EQUILIBRIUM = "chemical_equilibrium"  # 化学平衡
+    REDOX = "redox"                                # 氧化还原
+    MOLE_CALCULATION = "mole_calculation"          # 摩尔计算
+    ORGANIC_CHEMISTRY = "organic_chemistry"        # 有机化学
+    CHEMICAL_NOTATION = "chemical_notation"        # 化学用语
+    STRUCTURE_PROPERTIES = "structure_properties"  # 物构知识

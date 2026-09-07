@@ -64,6 +64,17 @@ class Settings(BaseSettings):
     # dashscope text-embedding-v3 输出维度。
     EMBEDDING_DIMENSION: int = 1024
 
+    # LLM 对话（诊断 / 学习计划，三级 fallback，见 design D4）
+    # 模型名可覆盖：实际模型 ID 需按 DashScope / DeepSeek 官方目录标定。
+    LLM_MODEL_PRIMARY: str = "qwen-mimo-v2.5"
+    LLM_MODEL_SECONDARY: str = "qwen-turbo"
+    LLM_MODEL_TERTIARY: str = "deepseek-v4-flash"
+    # DashScope OpenAI 兼容端点（MiMo / qwen 共用，复用 DASHSCOPE_API_KEY）。
+    LLM_DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # DeepSeek OpenAI 兼容端点。
+    LLM_DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    DEEPSEEK_API_KEY: str = ""
+
     @property
     def is_production(self) -> bool:
         """是否生产环境。用于决定是否暴露 API 文档等敏感入口。"""

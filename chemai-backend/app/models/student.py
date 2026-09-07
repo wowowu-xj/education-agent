@@ -60,6 +60,13 @@ class Student(Base, TimestampMixin, SoftDeleteMixin):
     barrier_profile: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     barrier_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
+    # 迷思概念画像（六类分布），与 barrier_profile 并列，诊断聚合写回。
+    misconception_profile: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    # 当前学习计划（JSON，可空），由学习计划 apply 端点写回。
+    current_plan: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
     total_practice_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_practice_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 

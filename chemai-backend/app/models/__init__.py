@@ -4,16 +4,20 @@ Alembic autogenerate 依赖 Base.metadata 感知所有表，因此必须在此�
 """
 
 from app.models.account import Account
+from app.models.barrier_config import BarrierConfig
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin
 from app.models.class_ import Class
+from app.models.diagnosis_override_log import DiagnosisOverrideLog
 from app.models.exam import Exam, ExamStatusTransition
 from app.models.grade import Grade
 from app.models.paper import Paper, PaperQuestion
 from app.models.parent import Parent
+from app.models.parent_notification import ParentNotification
 from app.models.question import Question
 from app.models.question_set import QuestionSet, QuestionSetItem
 from app.models.school import School
 from app.models.student import Student
+from app.models.student_answer import StudentAnswer
 from app.models.student_parent_binding import StudentParentBinding
 from app.models.teacher import Teacher
 from app.models.teacher_class_subject import TeacherClassSubject
@@ -29,7 +33,9 @@ __all__ = [
     "Account",
     "Teacher",
     "Student",
+    "StudentAnswer",
     "Parent",
+    "ParentNotification",
     "School",
     "Grade",
     "Class",
@@ -42,4 +48,6 @@ __all__ = [
     "PaperQuestion",
     "Exam",
     "ExamStatusTransition",
+    "BarrierConfig",
+    "DiagnosisOverrideLog",
 ]
