@@ -1,0 +1,273 @@
+{
+  "total": 18,
+  "barrier_type": {
+    "macro": {
+      "precision": 0.819,
+      "recall": 0.778
+    },
+    "per_class": [
+      {
+        "class": "concept",
+        "precision": 0.625,
+        "recall": 0.833,
+        "tp": 5,
+        "fp": 3,
+        "fn": 1
+      },
+      {
+        "class": "expression",
+        "precision": 0.833,
+        "recall": 0.833,
+        "tp": 5,
+        "fp": 1,
+        "fn": 1
+      },
+      {
+        "class": "reading",
+        "precision": 1.0,
+        "recall": 0.667,
+        "tp": 4,
+        "fp": 0,
+        "fn": 2
+      }
+    ]
+  },
+  "misconception_category": {
+    "macro": {
+      "precision": 0.905,
+      "recall": 0.778
+    },
+    "per_class": [
+      {
+        "class": "chemical_equilibrium",
+        "precision": 1.0,
+        "recall": 1.0,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0
+      },
+      {
+        "class": "chemical_notation",
+        "precision": 0.429,
+        "recall": 1.0,
+        "tp": 3,
+        "fp": 4,
+        "fn": 0
+      },
+      {
+        "class": "mole_calculation",
+        "precision": 1.0,
+        "recall": 0.667,
+        "tp": 2,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "class": "organic_chemistry",
+        "precision": 1.0,
+        "recall": 0.667,
+        "tp": 2,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "class": "redox",
+        "precision": 1.0,
+        "recall": 0.667,
+        "tp": 2,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "class": "structure_properties",
+        "precision": 1.0,
+        "recall": 0.667,
+        "tp": 2,
+        "fp": 0,
+        "fn": 1
+      }
+    ]
+  },
+  "detail": [
+    {
+      "id": "c-equilibrium",
+      "true_barrier": "concept",
+      "pred_barrier": "concept",
+      "true_misconception": "chemical_equilibrium",
+      "pred_misconception": "chemical_equilibrium",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "c-redox",
+      "true_barrier": "concept",
+      "pred_barrier": "concept",
+      "true_misconception": "redox",
+      "pred_misconception": "redox",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "c-mole",
+      "true_barrier": "concept",
+      "pred_barrier": "concept",
+      "true_misconception": "mole_calculation",
+      "pred_misconception": "mole_calculation",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "c-organic",
+      "true_barrier": "concept",
+      "pred_barrier": "concept",
+      "true_misconception": "organic_chemistry",
+      "pred_misconception": "organic_chemistry",
+      "confidence": 0.85,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "c-notation",
+      "true_barrier": "concept",
+      "pred_barrier": "expression",
+      "true_misconception": "chemical_notation",
+      "pred_misconception": "chemical_notation",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "c-structure",
+      "true_barrier": "concept",
+      "pred_barrier": "concept",
+      "true_misconception": "structure_properties",
+      "pred_misconception": "structure_properties",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "r-equilibrium",
+      "true_barrier": "reading",
+      "pred_barrier": "reading",
+      "true_misconception": "chemical_equilibrium",
+      "pred_misconception": "chemical_equilibrium",
+      "confidence": 0.85,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "r-redox",
+      "true_barrier": "reading",
+      "pred_barrier": "reading",
+      "true_misconception": "redox",
+      "pred_misconception": "chemical_notation",
+      "confidence": 0.75,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "r-mole",
+      "true_barrier": "reading",
+      "pred_barrier": "reading",
+      "true_misconception": "mole_calculation",
+      "pred_misconception": "mole_calculation",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "r-organic",
+      "true_barrier": "reading",
+      "pred_barrier": "concept",
+      "true_misconception": "organic_chemistry",
+      "pred_misconception": "organic_chemistry",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "r-notation",
+      "true_barrier": "reading",
+      "pred_barrier": "reading",
+      "true_misconception": "chemical_notation",
+      "pred_misconception": "chemical_notation",
+      "confidence": 0.85,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "r-structure",
+      "true_barrier": "reading",
+      "pred_barrier": "concept",
+      "true_misconception": "structure_properties",
+      "pred_misconception": "structure_properties",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "e-equilibrium",
+      "true_barrier": "expression",
+      "pred_barrier": "concept",
+      "true_misconception": "chemical_equilibrium",
+      "pred_misconception": "chemical_equilibrium",
+      "confidence": 0.9,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "e-redox",
+      "true_barrier": "expression",
+      "pred_barrier": "expression",
+      "true_misconception": "redox",
+      "pred_misconception": "redox",
+      "confidence": 0.85,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "e-mole",
+      "true_barrier": "expression",
+      "pred_barrier": "expression",
+      "true_misconception": "mole_calculation",
+      "pred_misconception": "chemical_notation",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "e-organic",
+      "true_barrier": "expression",
+      "pred_barrier": "expression",
+      "true_misconception": "organic_chemistry",
+      "pred_misconception": "chemical_notation",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "e-notation",
+      "true_barrier": "expression",
+      "pred_barrier": "expression",
+      "true_misconception": "chemical_notation",
+      "pred_misconception": "chemical_notation",
+      "confidence": 0.9,
+      "needs_review": false,
+      "fallback_reason": null
+    },
+    {
+      "id": "e-structure",
+      "true_barrier": "expression",
+      "pred_barrier": "expression",
+      "true_misconception": "structure_properties",
+      "pred_misconception": "chemical_notation",
+      "confidence": 0.95,
+      "needs_review": false,
+      "fallback_reason": null
+    }
+  ]
+}

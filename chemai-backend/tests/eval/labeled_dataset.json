@@ -1,0 +1,131 @@
+{
+  "description": "障碍诊断标注错题集：18 条覆盖 3 障碍类型 × 6 迷思概念类别，用于评估层回填 design D9 的精确率/召回率估算值。",
+  "items": [
+    {
+      "id": "c-equilibrium",
+      "barrier_type": "concept",
+      "misconception_category": "chemical_equilibrium",
+      "question_text": "工业合成氨为何使用催化剂？",
+      "student_answer": "催化剂能提高平衡转化率，所以多产氨"
+    },
+    {
+      "id": "c-redox",
+      "barrier_type": "concept",
+      "misconception_category": "redox",
+      "question_text": "在氧化还原反应中，氧化剂发生了什么变化？",
+      "student_answer": "氧化剂在反应中被氧化，所以它失去电子"
+    },
+    {
+      "id": "c-mole",
+      "barrier_type": "concept",
+      "misconception_category": "mole_calculation",
+      "question_text": "1 mol 水中含有多少个水分子和氢原子？",
+      "student_answer": "1 mol 水含 6.02×10^23 个水分子和 2 个氢原子"
+    },
+    {
+      "id": "c-organic",
+      "barrier_type": "concept",
+      "misconception_category": "organic_chemistry",
+      "question_text": "苯为什么通常较难发生加成反应？",
+      "student_answer": "苯不能加成，因为它有碳碳双键不稳定"
+    },
+    {
+      "id": "c-notation",
+      "barrier_type": "concept",
+      "misconception_category": "chemical_notation",
+      "question_text": "配平化学方程式时右下角的数字可以改动吗？",
+      "student_answer": "可以随便调整，比如把 H2O 改成 HO 来配平"
+    },
+    {
+      "id": "c-structure",
+      "barrier_type": "concept",
+      "misconception_category": "structure_properties",
+      "question_text": "离子化合物固态时能导电吗？",
+      "student_answer": "离子化合物固态能导电，因为离子可以自由移动"
+    },
+    {
+      "id": "r-equilibrium",
+      "barrier_type": "reading",
+      "misconception_category": "chemical_equilibrium",
+      "question_text": "恒温恒容下增大反应物浓度，平衡如何移动？",
+      "student_answer": "题目给了压强变化，我按体积不变来算平衡移动了"
+    },
+    {
+      "id": "r-redox",
+      "barrier_type": "reading",
+      "misconception_category": "redox",
+      "question_text": "在酸性介质中配平 KMnO4 与 FeSO4 的反应。",
+      "student_answer": "没注意到题目要求酸性介质，配平里多加了 OH-"
+    },
+    {
+      "id": "r-mole",
+      "barrier_type": "reading",
+      "misconception_category": "mole_calculation",
+      "question_text": "标准状况下 11.2 L 氢气的物质的量是多少？",
+      "student_answer": "没看到标准状况这个条件，直接按 22.4 算了"
+    },
+    {
+      "id": "r-organic",
+      "barrier_type": "reading",
+      "misconception_category": "organic_chemistry",
+      "question_text": "甲苯苯环上的一氯代物有几种？",
+      "student_answer": "把苯环上和支链上的氢都算进去了"
+    },
+    {
+      "id": "r-notation",
+      "barrier_type": "reading",
+      "misconception_category": "chemical_notation",
+      "question_text": "请写出氯化钠的电子式。",
+      "student_answer": "看错题目要求，写成了结构式"
+    },
+    {
+      "id": "r-structure",
+      "barrier_type": "reading",
+      "misconception_category": "structure_properties",
+      "question_text": "比较 HCl 与 HI 的分子间作用力强弱。",
+      "student_answer": "把分子间作用力当成化学键来比较"
+    },
+    {
+      "id": "e-equilibrium",
+      "barrier_type": "expression",
+      "misconception_category": "chemical_equilibrium",
+      "question_text": "升高温度对放热反应平衡常数的影响？",
+      "student_answer": "我知道勒夏特列原理，但写成 K 随浓度变化"
+    },
+    {
+      "id": "e-redox",
+      "barrier_type": "expression",
+      "misconception_category": "redox",
+      "question_text": "标出 2H2 + O2 → 2H2O 的电子转移方向。",
+      "student_answer": "配平对了，但把电子转移方向标成从氧到氢"
+    },
+    {
+      "id": "e-mole",
+      "barrier_type": "expression",
+      "misconception_category": "mole_calculation",
+      "question_text": "计算所得盐酸的物质的量浓度。",
+      "student_answer": "计算过程对，但把单位 mol/L 写成了 mol"
+    },
+    {
+      "id": "e-organic",
+      "barrier_type": "expression",
+      "misconception_category": "organic_chemistry",
+      "question_text": "写出乙酸的官能团结构简式。",
+      "student_answer": "知道是羧基，但把 -COOH 写成了 -CO2H"
+    },
+    {
+      "id": "e-notation",
+      "barrier_type": "expression",
+      "misconception_category": "chemical_notation",
+      "question_text": "写出过氧化氢分解的化学方程式。",
+      "student_answer": "忘了写反应条件和气体符号↑"
+    },
+    {
+      "id": "e-structure",
+      "barrier_type": "expression",
+      "misconception_category": "structure_properties",
+      "question_text": "画出水的电子式。",
+      "student_answer": "会判断共用电子对，但少画了一对孤对电子"
+    }
+  ]
+}
